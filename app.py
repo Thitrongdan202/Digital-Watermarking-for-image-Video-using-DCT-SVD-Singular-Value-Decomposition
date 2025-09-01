@@ -16,11 +16,26 @@ try:
         detect_watermark_video,
         get_video_info
     )
-    from watermark.color_video_dct_svd import (
-        embed_watermark_video_color,
-        embed_text_watermark_video_color,
-        extract_watermark_video_color
-    )
+    try:
+        from watermark.color_video_dct_svd_with_audio import (
+            embed_watermark_video_color_with_audio,
+            embed_text_watermark_video_color_with_audio
+        )
+        # Check if ffmpeg is available for audio support
+        import subprocess
+        try:
+            result = subprocess.run(['ffmpeg', '-version'], capture_output=True, timeout=3)
+            AUDIO_SUPPORT = result.returncode == 0
+        except:
+            AUDIO_SUPPORT = False
+    except ImportError:
+        from watermark.color_video_dct_svd import (
+            embed_watermark_video_color,
+            embed_text_watermark_video_color
+        )
+        AUDIO_SUPPORT = False
+    
+    from watermark.color_video_dct_svd import extract_watermark_video_color
     VIDEO_SUPPORT = True
 except ImportError:
     VIDEO_SUPPORT = False
@@ -576,28 +591,51 @@ class WatermarkApp(tk.Tk):
                 if is_text_watermark:
                     # Text watermark for video
                     font_size = self.font_size_var.get()
-                    embed_text_watermark_video_color(
-                        host_path,
-                        text,
-                        output_path,
-                        meta_path,
-                        alpha=alpha,
-                        font_size=font_size,
-                        frame_interval=10
-                    )
-                    success_msg = f"Color text watermarked video saved as:\n{output_path}\n\nText: '{text}'\nMetadata: {meta_path}"
+                    if AUDIO_SUPPORT:
+                        embed_text_watermark_video_color_with_audio(
+                            host_path,
+                            text,
+                            output_path,
+                            meta_path,
+                            alpha=alpha,
+                            font_size=font_size,
+                            frame_interval=10
+                        )
+                    else:
+                        embed_text_watermark_video_color(
+                            host_path,
+                            text,
+                            output_path,
+                            meta_path,
+                            alpha=alpha,
+                            font_size=font_size,
+                            frame_interval=10
+                        )
+                    audio_status = " (with audio)" if AUDIO_SUPPORT else " (no audio - install ffmpeg)"
+                    success_msg = f"Color text watermarked video saved as:\n{output_path}\n\nText: '{text}'\nMetadata: {meta_path}{audio_status}"
                 else:
                     # Image watermark for video
                     watermark_path = self.wm_var.get()
-                    embed_watermark_video_color(
-                        host_path,
-                        watermark_path, 
-                        output_path,
-                        meta_path,
-                        alpha=alpha,
-                        frame_interval=10
-                    )
-                    success_msg = f"Color watermarked video saved as:\n{output_path}\n\nMetadata: {meta_path}"
+                    if AUDIO_SUPPORT:
+                        embed_watermark_video_color_with_audio(
+                            host_path,
+                            watermark_path, 
+                            output_path,
+                            meta_path,
+                            alpha=alpha,
+                            frame_interval=10
+                        )
+                    else:
+                        embed_watermark_video_color(
+                            host_path,
+                            watermark_path, 
+                            output_path,
+                            meta_path,
+                            alpha=alpha,
+                            frame_interval=10
+                        )
+                    audio_status = " (with audio)" if AUDIO_SUPPORT else " (no audio - install ffmpeg)"
+                    success_msg = f"Color watermarked video saved as:\n{output_path}\n\nMetadata: {meta_path}{audio_status}"
                 
                 self.progress.stop()
                 self._update_status("Video watermark embedded successfully!")

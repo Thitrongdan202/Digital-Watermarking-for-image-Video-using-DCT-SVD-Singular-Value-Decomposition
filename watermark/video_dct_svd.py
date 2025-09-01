@@ -6,6 +6,52 @@ from numpy.linalg import svd
 from PIL import Image
 import tempfile
 import os
+import subprocess
+
+
+def _preserve_audio_with_ffmpeg(video_only_path: str, original_video_path: str, final_output_path: str) -> bool:
+    """
+    Use ffmpeg to combine watermarked video with original audio.
+    Returns True if successful, False otherwise.
+    """
+    try:
+        # Check if ffmpeg is available
+        result = subprocess.run(['ffmpeg', '-version'], 
+                              capture_output=True, text=True, timeout=5)
+        if result.returncode != 0:
+            print("FFmpeg not found - audio will not be preserved")
+            return False
+            
+        # Combine video and audio using ffmpeg
+        cmd = [
+            'ffmpeg', '-y',  # -y to overwrite output file
+            '-i', video_only_path,  # Input watermarked video (no audio)
+            '-i', original_video_path,  # Input original video (for audio)
+            '-c:v', 'copy',  # Copy video stream as-is
+            '-c:a', 'aac',   # Re-encode audio to AAC
+            '-map', '0:v:0', # Take video from first input
+            '-map', '1:a:0', # Take audio from second input
+            '-shortest',     # End when shortest stream ends
+            final_output_path
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode == 0:
+            print("Audio successfully preserved using ffmpeg")
+            return True
+        else:
+            print(f"FFmpeg failed: {result.stderr}")
+            return False
+            
+    except subprocess.TimeoutExpired:
+        print("FFmpeg timeout - audio preservation failed")
+        return False
+    except FileNotFoundError:
+        print("FFmpeg not found - audio will not be preserved")
+        return False
+    except Exception as e:
+        print(f"FFmpeg error: {e}")
+        return False
 
 
 def embed_watermark_video(
