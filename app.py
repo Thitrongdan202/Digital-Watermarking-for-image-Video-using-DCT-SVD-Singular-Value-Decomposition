@@ -3,16 +3,45 @@ from tkinter import ttk, filedialog, messagebox, Canvas
 from PIL import Image, ImageTk
 import os
 import time
-import cv2
 from pathlib import Path
-from watermark.dct_svd import embed_watermark, extract_watermark, singular_values
-from watermark.video_dct_svd import (
-    embed_watermark_video, 
-    extract_watermark_video, 
-    detect_watermark_video,
-    get_video_info
+from watermark.dct_svd import (
+    embed_watermark, extract_watermark, singular_values,
+    embed_text_watermark, extract_text_watermark
 )
+
+# Try to import OpenCV and video functionality
+try:
+    import cv2
+    from watermark.video_dct_svd import (
+        detect_watermark_video,
+        get_video_info
+    )
+    from watermark.color_video_dct_svd import (
+        embed_watermark_video_color,
+        embed_text_watermark_video_color,
+        extract_watermark_video_color
+    )
+    VIDEO_SUPPORT = True
+except ImportError:
+    VIDEO_SUPPORT = False
+    print("Warning: OpenCV not found. Video functionality disabled.")
 from watermark.ai import WatermarkDetector
+
+
+def get_media_filetypes():
+    """Get appropriate filetypes based on video support availability"""
+    if VIDEO_SUPPORT:
+        return [
+            ("Media files", "*.png *.jpg *.jpeg *.bmp *.gif *.tiff *.mp4 *.avi *.mov *.mkv *.wmv"),
+            ("Image files", "*.png *.jpg *.jpeg *.bmp *.gif *.tiff"),
+            ("Video files", "*.mp4 *.avi *.mov *.mkv *.wmv *.flv *.webm"),
+            ("All files", "*.*")
+        ]
+    else:
+        return [
+            ("Image files", "*.png *.jpg *.jpeg *.bmp *.gif *.tiff"),
+            ("All files", "*.*")
+        ]
 
 
 class ModernTooltip:
@@ -94,9 +123,9 @@ class WatermarkApp(tk.Tk):
         extract_frame = self._create_extract_tab()
         detect_frame = self._create_detect_tab()
 
-        notebook.add(embed_frame, text="🔧 EMBED")
-        notebook.add(extract_frame, text="📤 EXTRACT")  
-        notebook.add(detect_frame, text="🔍 DETECT")
+        notebook.add(embed_frame, text="EMBED")
+        notebook.add(extract_frame, text="EXTRACT")  
+        notebook.add(detect_frame, text="DETECT")
         
         # Status bar
         self._create_status_bar()
@@ -134,8 +163,59 @@ class WatermarkApp(tk.Tk):
         right_panel = self._create_card_frame(content_frame, "Watermark")
         right_panel.pack(side="right", fill="both", expand=True, padx=(10, 0))
         
+        # Watermark type selection
+        self.wm_type_var = tk.StringVar(value="image")
+        type_frame = tk.Frame(right_panel, bg=self.colors['card_bg'])
+        type_frame.pack(fill="x", padx=15, pady=10)
+        
+        tk.Label(type_frame, text="Watermark Type:", bg=self.colors['card_bg'], 
+                fg=self.colors['text'], font=('Segoe UI', 10, 'bold')).pack(anchor="w")
+        
+        type_selection_frame = tk.Frame(type_frame, bg=self.colors['card_bg'])
+        type_selection_frame.pack(fill="x", pady=5)
+        
+        tk.Radiobutton(type_selection_frame, text=" Image", variable=self.wm_type_var, value="image",
+                      bg=self.colors['card_bg'], fg=self.colors['text'], selectcolor='#3a3a3a',
+                      command=self._on_watermark_type_change).pack(side="left")
+        tk.Radiobutton(type_selection_frame, text=" Text", variable=self.wm_type_var, value="text",
+                      bg=self.colors['card_bg'], fg=self.colors['text'], selectcolor='#3a3a3a',
+                      command=self._on_watermark_type_change).pack(side="left", padx=(20, 0))
+        
+        # Image watermark input (default)
+        self.image_input_frame = tk.Frame(right_panel, bg=self.colors['card_bg'])
+        self.image_input_frame.pack(fill="x", padx=15, pady=5)
+        
         self.wm_var = tk.StringVar()
-        self._create_file_input(right_panel, "Select watermark image", self.wm_var, self._pick_wm)
+        self._create_file_input(self.image_input_frame, "Select watermark image", self.wm_var, self._pick_wm)
+        
+        # Text watermark input (hidden initially)
+        self.text_input_frame = tk.Frame(right_panel, bg=self.colors['card_bg'])
+        
+        tk.Label(self.text_input_frame, text="Enter watermark text:", bg=self.colors['card_bg'], 
+                fg=self.colors['text'], font=('Segoe UI', 10)).pack(anchor="w", pady=(0, 5))
+        
+        self.wm_text_var = tk.StringVar(value="Sample Watermark")
+        self.wm_text_var.trace('w', lambda *args: self._update_text_preview())
+        text_entry = tk.Entry(self.text_input_frame, textvariable=self.wm_text_var, font=('Segoe UI', 12),
+                             bg='#3a3a3a', fg=self.colors['text'], relief='flat', bd=8)
+        text_entry.pack(fill="x", pady=(0, 10))
+        
+        # Font size control for text
+        font_size_frame = tk.Frame(self.text_input_frame, bg=self.colors['card_bg'])
+        font_size_frame.pack(fill="x", pady=5)
+        
+        tk.Label(font_size_frame, text="Font Size:", bg=self.colors['card_bg'], 
+                fg=self.colors['text'], font=('Segoe UI', 10)).pack(anchor="w")
+        
+        self.font_size_var = tk.IntVar(value=40)
+        font_size_scale = tk.Scale(font_size_frame, from_=20, to=80, resolution=5,
+                                  orient="horizontal", variable=self.font_size_var,
+                                  bg=self.colors['card_bg'], fg=self.colors['text'],
+                                  highlightthickness=0, troughcolor='#3a3a3a',
+                                  command=lambda x: self._update_text_preview())
+        font_size_scale.pack(fill="x", pady=2)
+        
+        # Preview panel
         self.wm_preview = self._create_preview_panel(right_panel)
         
         # Settings sidebar
@@ -143,7 +223,7 @@ class WatermarkApp(tk.Tk):
         settings_frame.pack(side="right", fill="y", padx=(10, 0))
         
         # Action button
-        self._create_action_button(frame, "🔧 EMBED WATERMARK", self._embed, self.colors['accent'])
+        self._create_action_button(frame, " EMBED WATERMARK", self._embed, self.colors['accent'])
         
         return frame
 
@@ -168,7 +248,7 @@ class WatermarkApp(tk.Tk):
         self.extract_preview = self._create_preview_panel(input_panel)
         
         # Action button
-        self._create_action_button(frame, "📤 EXTRACT WATERMARK", self._extract, self.colors['success'])
+        self._create_action_button(frame, " EXTRACT WATERMARK", self._extract, self.colors['success'])
         
         return frame
 
@@ -195,7 +275,7 @@ class WatermarkApp(tk.Tk):
         self.result_label.pack(pady=20)
         
         # Action button
-        self._create_action_button(frame, "🔍 DETECT WATERMARK", self._detect, self.colors['error'])
+        self._create_action_button(frame, "DETECT WATERMARK", self._detect, self.colors['error'])
         
         return frame
 
@@ -212,7 +292,7 @@ class WatermarkApp(tk.Tk):
         input_frame = tk.Frame(parent, bg=self.colors['card_bg'])
         input_frame.pack(fill="x", padx=15, pady=5)
         
-        btn = tk.Button(input_frame, text="📁 Browse", command=command,
+        btn = tk.Button(input_frame, text="Browse", command=command,
                        bg=self.colors['accent'], fg='white', font=('Segoe UI', 9),
                        relief='flat', padx=15, pady=8)
         btn.pack(side="left")
@@ -296,8 +376,61 @@ class WatermarkApp(tk.Tk):
         self.status_label.config(text=message)
         self.update_idletasks()
 
+    def _on_watermark_type_change(self):
+        """Handle watermark type change between image and text"""
+        if self.wm_type_var.get() == "text":
+            # Hide image input, show text input
+            self.image_input_frame.pack_forget()
+            self.text_input_frame.pack(fill="x", padx=15, pady=5)
+            self._update_text_preview()
+        else:
+            # Hide text input, show image input  
+            self.text_input_frame.pack_forget()
+            self.image_input_frame.pack(fill="x", padx=15, pady=5)
+            # Update image preview if file is selected
+            if self.wm_var.get():
+                self.after(100, lambda: self._update_preview(self.wm_preview, self.wm_var.get()))
+
+    def _update_text_preview(self):
+        """Update preview to show text watermark"""
+        try:
+            if hasattr(self, 'wm_preview'):
+                # Clear canvas
+                self.wm_preview.delete("all")
+                
+                # Show text preview
+                text = self.wm_text_var.get() or "Sample Watermark"
+                font_size = self.font_size_var.get()
+                
+                canvas_width = self.wm_preview.winfo_width() or 300
+                canvas_height = self.wm_preview.winfo_height() or 200
+                x = canvas_width // 2
+                y = canvas_height // 2
+                
+                # Create text preview
+                self.wm_preview.create_rectangle(20, 20, canvas_width-20, canvas_height-20, 
+                                               fill='#1a1a1a', outline=self.colors['text_secondary'])
+                
+                # Scale font size for preview
+                preview_font_size = max(10, min(font_size // 2, 20))
+                font = ('Segoe UI', preview_font_size, 'bold')
+                
+                self.wm_preview.create_text(x, y - 20, text=text, fill=self.colors['text'], 
+                                          font=font, anchor="center")
+                
+                self.wm_preview.create_text(x, y + 20, text=f" TEXT WATERMARK", 
+                                          fill=self.colors['accent'], font=('Segoe UI', 10, 'bold'))
+                
+                info_text = f"Font size: {font_size}"
+                self.wm_preview.create_text(x, y + 40, text=info_text, 
+                                          fill=self.colors['text_secondary'], font=('Segoe UI', 8))
+        except Exception as e:
+            pass
+
     def _is_video_file(self, file_path: str) -> bool:
         """Check if file is a video format"""
+        if not VIDEO_SUPPORT:
+            return False
         video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm'}
         return Path(file_path).suffix.lower() in video_extensions
 
@@ -308,7 +441,7 @@ class WatermarkApp(tk.Tk):
                 # Clear canvas
                 canvas.delete("all")
                 
-                if self._is_video_file(file_path):
+                if self._is_video_file(file_path) and VIDEO_SUPPORT:
                     # Video preview - extract first frame
                     cap = cv2.VideoCapture(file_path)
                     ret, frame = cap.read()
@@ -333,13 +466,13 @@ class WatermarkApp(tk.Tk):
                         canvas.image = photo  # Keep reference
                         
                         # Add video icon overlay
-                        canvas.create_text(x, y + 70, text="🎥 VIDEO", 
+                        canvas.create_text(x, y + 70, text="VIDEO", 
                                          fill=self.colors['accent'], font=('Segoe UI', 10, 'bold'))
                         
                         # Add video info
                         try:
                             info = get_video_info(file_path)
-                            info_text = f"{info['width']}x{info['height']} • {info['fps']:.1f}fps • {info['duration_seconds']:.1f}s"
+                            info_text = f"{info['width']}x{info['height']} * {info['fps']:.1f}fps * {info['duration_seconds']:.1f}s"
                             canvas.create_text(x, y + 90, text=info_text, 
                                              fill=self.colors['text_secondary'], font=('Segoe UI', 8))
                         except:
@@ -365,7 +498,7 @@ class WatermarkApp(tk.Tk):
                     canvas.image = photo  # Keep reference
                     
                     # Add image icon
-                    canvas.create_text(x, y + 70, text="📷 IMAGE", 
+                    canvas.create_text(x, y + 70, text=" IMAGE", 
                                      fill=self.colors['success'], font=('Segoe UI', 10, 'bold'))
                 
         except Exception as e:
@@ -378,12 +511,7 @@ class WatermarkApp(tk.Tk):
     def _pick_host(self) -> None:
         path = filedialog.askopenfilename(
             title="Select Host Media",
-            filetypes=[
-                ("Media files", "*.png *.jpg *.jpeg *.bmp *.gif *.tiff *.mp4 *.avi *.mov *.mkv *.wmv"),
-                ("Image files", "*.png *.jpg *.jpeg *.bmp *.gif *.tiff"),
-                ("Video files", "*.mp4 *.avi *.mov *.mkv *.wmv *.flv *.webm"),
-                ("All files", "*.*")
-            ]
+            filetypes=get_media_filetypes()
         )
         if path:
             self.host_var.set(path)
@@ -406,57 +534,106 @@ class WatermarkApp(tk.Tk):
                 self.after(100, lambda: self._update_preview(self.wm_preview, path))
 
     def _embed(self) -> None:
-        if not self.host_var.get() or not self.wm_var.get():
-            self._show_error("Please select both host media and watermark image")
-            return
-        
         host_path = self.host_var.get()
-        watermark_path = self.wm_var.get()
+        if not host_path:
+            self._show_error("Please select host media")
+            return
+            
+        # Check watermark type
+        is_text_watermark = self.wm_type_var.get() == "text"
+        
+        if is_text_watermark:
+            # Text watermark validation
+            text = self.wm_text_var.get().strip()
+            if not text:
+                self._show_error("Please enter watermark text")
+                return
+        else:
+            # Image watermark validation
+            if not self.wm_var.get():
+                self._show_error("Please select watermark image")
+                return
         
         # Check if host is video or image
         is_video = self._is_video_file(host_path)
+        
+        if is_video and not VIDEO_SUPPORT:
+            messagebox.showerror("Error", "Video functionality requires OpenCV. Please install opencv-python.")
+            return
         
         self._update_status("Embedding watermark...")
         self.progress.start(10)
         
         try:
             timestamp = str(int(time.time()))
+            alpha = self.strength_var.get() if hasattr(self, 'strength_var') else 0.05
             
             if is_video:
                 # Video watermarking
                 output_path = f"watermarked_video_{timestamp}.mp4"
                 meta_path = f"metadata_video_{timestamp}.npz"
                 
-                # Get watermark strength from UI
-                alpha = self.strength_var.get() if hasattr(self, 'strength_var') else 0.05
-                
-                embed_watermark_video(
-                    host_path,
-                    watermark_path, 
-                    output_path,
-                    meta_path,
-                    alpha=alpha,
-                    frame_interval=10  # Watermark every 10th frame
-                )
+                if is_text_watermark:
+                    # Text watermark for video
+                    font_size = self.font_size_var.get()
+                    embed_text_watermark_video_color(
+                        host_path,
+                        text,
+                        output_path,
+                        meta_path,
+                        alpha=alpha,
+                        font_size=font_size,
+                        frame_interval=10
+                    )
+                    success_msg = f"Color text watermarked video saved as:\n{output_path}\n\nText: '{text}'\nMetadata: {meta_path}"
+                else:
+                    # Image watermark for video
+                    watermark_path = self.wm_var.get()
+                    embed_watermark_video_color(
+                        host_path,
+                        watermark_path, 
+                        output_path,
+                        meta_path,
+                        alpha=alpha,
+                        frame_interval=10
+                    )
+                    success_msg = f"Color watermarked video saved as:\n{output_path}\n\nMetadata: {meta_path}"
                 
                 self.progress.stop()
                 self._update_status("Video watermark embedded successfully!")
-                self._show_success(f"Watermarked video saved as:\n{output_path}\n\nMetadata: {meta_path}")
+                self._show_success(success_msg)
+                
             else:
                 # Image watermarking
                 output_path = f"watermarked_{timestamp}.png"
                 meta_path = f"metadata_{timestamp}.npz"
                 
-                embed_watermark(
-                    host_path,
-                    watermark_path,
-                    output_path, 
-                    meta_path
-                )
+                if is_text_watermark:
+                    # Text watermark for image
+                    font_size = self.font_size_var.get()
+                    embed_text_watermark(
+                        host_path,
+                        text,
+                        output_path,
+                        meta_path,
+                        alpha=alpha,
+                        font_size=font_size
+                    )
+                    success_msg = f"Text watermarked image saved as:\n{output_path}\n\nText: '{text}'"
+                else:
+                    # Image watermark for image
+                    watermark_path = self.wm_var.get()
+                    embed_watermark(
+                        host_path,
+                        watermark_path,
+                        output_path, 
+                        meta_path
+                    )
+                    success_msg = f"Image watermarked image saved as:\n{output_path}"
                 
                 self.progress.stop()
                 self._update_status("Image watermark embedded successfully!")
-                self._show_success(f"Watermarked image saved as:\n{output_path}")
+                self._show_success(success_msg)
                 
         except Exception as exc:
             self.progress.stop()
@@ -471,12 +648,7 @@ class WatermarkApp(tk.Tk):
     def _pick_wm_image(self) -> None:
         path = filedialog.askopenfilename(
             title="Select Watermarked Media",
-            filetypes=[
-                ("Media files", "*.png *.jpg *.jpeg *.bmp *.gif *.tiff *.mp4 *.avi *.mov *.mkv *.wmv"),
-                ("Image files", "*.png *.jpg *.jpeg *.bmp *.gif *.tiff"),
-                ("Video files", "*.mp4 *.avi *.mov *.mkv *.wmv *.flv *.webm"),
-                ("All files", "*.*")
-            ]
+            filetypes=get_media_filetypes()
         )
         if path:
             self.wm_image_var.set(path)
@@ -504,6 +676,10 @@ class WatermarkApp(tk.Tk):
         # Check if watermarked media is video or image
         is_video = self._is_video_file(watermarked_path)
         
+        if is_video and not VIDEO_SUPPORT:
+            messagebox.showerror("Error", "Video functionality requires OpenCV. Please install opencv-python.")
+            return
+        
         self._update_status("Extracting watermark...")
         self.progress.start(10)
         
@@ -513,7 +689,7 @@ class WatermarkApp(tk.Tk):
             
             if is_video:
                 # Extract from video
-                extract_watermark_video(
+                extracted_text = extract_watermark_video_color(
                     watermarked_path,
                     metadata_path,
                     extracted_path
@@ -521,10 +697,16 @@ class WatermarkApp(tk.Tk):
                 
                 self.progress.stop()
                 self._update_status("Watermark extracted from video!")
-                self._show_success(f"Extracted watermark saved as:\n{extracted_path}")
+                
+                if extracted_text:
+                    success_msg = f"Text watermark extracted from video!\n\nOriginal text: '{extracted_text}'\n\nWatermark image saved as: {extracted_path}"
+                else:
+                    success_msg = f"Watermark extracted from video!\n\nExtracted watermark saved as: {extracted_path}"
+                    
+                self._show_success(success_msg)
             else:
                 # Extract from image
-                extract_watermark(
+                extracted_text = extract_text_watermark(
                     watermarked_path,
                     metadata_path,
                     extracted_path
@@ -532,7 +714,13 @@ class WatermarkApp(tk.Tk):
                 
                 self.progress.stop()
                 self._update_status("Watermark extracted from image!")
-                self._show_success(f"Extracted watermark saved as:\n{extracted_path}")
+                
+                if extracted_text:
+                    success_msg = f"Text watermark extracted from image!\n\nOriginal text: '{extracted_text}'\n\nWatermark image saved as: {extracted_path}"
+                else:
+                    success_msg = f"Watermark extracted from image!\n\nExtracted watermark saved as: {extracted_path}"
+                    
+                self._show_success(success_msg)
             
         except Exception as exc:
             self.progress.stop()
@@ -547,12 +735,7 @@ class WatermarkApp(tk.Tk):
     def _pick_detect(self) -> None:
         path = filedialog.askopenfilename(
             title="Select Media to Analyze", 
-            filetypes=[
-                ("Media files", "*.png *.jpg *.jpeg *.bmp *.gif *.tiff *.mp4 *.avi *.mov *.mkv *.wmv"),
-                ("Image files", "*.png *.jpg *.jpeg *.bmp *.gif *.tiff"),
-                ("Video files", "*.mp4 *.avi *.mov *.mkv *.wmv *.flv *.webm"),
-                ("All files", "*.*")
-            ]
+            filetypes=get_media_filetypes()
         )
         if path:
             self.detect_var.set(path)
@@ -566,6 +749,10 @@ class WatermarkApp(tk.Tk):
         media_path = self.detect_var.get()
         is_video = self._is_video_file(media_path)
         
+        if is_video and not VIDEO_SUPPORT:
+            messagebox.showerror("Error", "Video functionality requires OpenCV. Please install opencv-python.")
+            return
+        
         self._update_status("Analyzing media for watermark...")
         self.progress.start(10)
         
@@ -577,7 +764,7 @@ class WatermarkApp(tk.Tk):
                 self.progress.stop()
                 
                 if 'error' in results:
-                    result_text = f"❌ DETECTION FAILED\n{results['error']}"
+                    result_text = f"FAILED: DETECTION FAILED\n{results['error']}"
                     self.result_label.config(text=result_text, fg=self.colors['error'])
                     self._update_status("Video analysis failed")
                 else:
@@ -585,11 +772,11 @@ class WatermarkApp(tk.Tk):
                     frames_analyzed = results['total_frames_analyzed']
                     
                     if likelihood > 0.6:  # Threshold for watermark detection
-                        result_text = f"🎥 VIDEO WATERMARK LIKELY\nLikelihood: {likelihood:.1%}\nFrames analyzed: {frames_analyzed}"
+                        result_text = f"VIDEO WATERMARK LIKELY\nLikelihood: {likelihood:.1%}\nFrames analyzed: {frames_analyzed}"
                         self.result_label.config(text=result_text, fg=self.colors['success'])
                         self._update_status("Video watermark likely detected!")
                     else:
-                        result_text = f"❌ NO VIDEO WATERMARK\nLikelihood: {likelihood:.1%}\nFrames analyzed: {frames_analyzed}"
+                        result_text = f"NO VIDEO WATERMARK\nLikelihood: {likelihood:.1%}\nFrames analyzed: {frames_analyzed}"
                         self.result_label.config(text=result_text, fg=self.colors['error'])  
                         self._update_status("No video watermark detected")
             else:
@@ -601,18 +788,18 @@ class WatermarkApp(tk.Tk):
                 self.progress.stop()
                 
                 if pred == 1:
-                    result_text = f"📷 IMAGE WATERMARK DETECTED\nConfidence: {confidence[1]:.2%}"
+                    result_text = f" IMAGE WATERMARK DETECTED\nConfidence: {confidence[1]:.2%}"
                     self.result_label.config(text=result_text, fg=self.colors['success'])
                     self._update_status("Image watermark detected!")
                 else:
-                    result_text = f"❌ NO IMAGE WATERMARK\nConfidence: {confidence[0]:.2%}"
+                    result_text = f"FAILED: NO IMAGE WATERMARK\nConfidence: {confidence[0]:.2%}"
                     self.result_label.config(text=result_text, fg=self.colors['error'])
                     self._update_status("No image watermark detected")
                 
         except Exception as exc:
             self.progress.stop()
             self._update_status("Detection failed")
-            self.result_label.config(text=f"❌ DETECTION FAILED\n{str(exc)[:50]}...", 
+            self.result_label.config(text=f"FAILED: DETECTION FAILED\n{str(exc)[:50]}...", 
                                    fg=self.colors['error'])
 
     def _show_success(self, message):
@@ -627,7 +814,7 @@ class WatermarkApp(tk.Tk):
         win.transient(self)
         win.grab_set()
         
-        tk.Label(win, text="✅ Success", bg=self.colors['card_bg'], 
+        tk.Label(win, text="SUCCESS: Success", bg=self.colors['card_bg'], 
                 fg=self.colors['success'], font=('Segoe UI', 14, 'bold')).pack(pady=15)
         
         tk.Label(win, text=message, bg=self.colors['card_bg'], 
@@ -648,7 +835,7 @@ class WatermarkApp(tk.Tk):
         win.transient(self)
         win.grab_set()
         
-        tk.Label(win, text="❌ Error", bg=self.colors['card_bg'], 
+        tk.Label(win, text="FAILED: Error", bg=self.colors['card_bg'], 
                 fg=self.colors['error'], font=('Segoe UI', 14, 'bold')).pack(pady=15)
         
         tk.Label(win, text=message, bg=self.colors['card_bg'], 
