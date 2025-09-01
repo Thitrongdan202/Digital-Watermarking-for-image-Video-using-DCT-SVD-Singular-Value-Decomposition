@@ -639,7 +639,7 @@ class WatermarkApp(tk.Tk):
                 
                 self.progress.stop()
                 self._update_status("Video watermark embedded successfully!")
-                self._show_success(success_msg)
+                self._show_success_with_preview(success_msg, video_path=output_path)
                 
             else:
                 # Image watermarking
@@ -671,7 +671,7 @@ class WatermarkApp(tk.Tk):
                 
                 self.progress.stop()
                 self._update_status("Image watermark embedded successfully!")
-                self._show_success(success_msg)
+                self._show_success_with_preview(success_msg, image_path=output_path)
                 
         except Exception as exc:
             self.progress.stop()
@@ -737,11 +737,11 @@ class WatermarkApp(tk.Tk):
                 self._update_status("Watermark extracted from video!")
                 
                 if extracted_text:
-                    success_msg = f"Text watermark extracted from video!\n\nOriginal text: '{extracted_text}'\n\nWatermark image saved as: {extracted_path}"
+                    success_msg = f"Text watermark extracted from video!\n\nExtracted watermark saved as: {extracted_path}"
                 else:
                     success_msg = f"Watermark extracted from video!\n\nExtracted watermark saved as: {extracted_path}"
                     
-                self._show_success(success_msg)
+                self._show_extraction_result_with_preview(success_msg, extracted_path, extracted_text)
             else:
                 # Extract from image
                 extracted_text = extract_text_watermark(
@@ -754,11 +754,11 @@ class WatermarkApp(tk.Tk):
                 self._update_status("Watermark extracted from image!")
                 
                 if extracted_text:
-                    success_msg = f"Text watermark extracted from image!\n\nOriginal text: '{extracted_text}'\n\nWatermark image saved as: {extracted_path}"
+                    success_msg = f"Text watermark extracted from image!\n\nExtracted watermark saved as: {extracted_path}"
                 else:
                     success_msg = f"Watermark extracted from image!\n\nExtracted watermark saved as: {extracted_path}"
                     
-                self._show_success(success_msg)
+                self._show_extraction_result_with_preview(success_msg, extracted_path, extracted_text)
             
         except Exception as exc:
             self.progress.stop()
@@ -840,8 +840,221 @@ class WatermarkApp(tk.Tk):
             self.result_label.config(text=f"FAILED: DETECTION FAILED\n{str(exc)[:50]}...", 
                                    fg=self.colors['error'])
 
+    def _show_success_with_preview(self, message, image_path=None, video_path=None):
+        """Show success message with preview of result"""
+        win = tk.Toplevel(self)
+        win.title("Success - Preview")
+        win.configure(bg=self.colors['card_bg'])
+        win.resizable(True, True)
+        
+        # Center on parent
+        win.transient(self)
+        win.grab_set()
+        
+        # Main container
+        main_frame = tk.Frame(win, bg=self.colors['card_bg'])
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Success message
+        tk.Label(main_frame, text="SUCCESS: Operation Completed", bg=self.colors['card_bg'], 
+                fg=self.colors['success'], font=('Segoe UI', 14, 'bold')).pack(pady=(0, 10))
+        
+        tk.Label(main_frame, text=message, bg=self.colors['card_bg'], 
+                fg=self.colors['text'], font=('Segoe UI', 10), wraplength=500).pack(pady=(0, 15))
+        
+        # Preview section
+        if image_path and os.path.exists(image_path):
+            preview_frame = tk.Frame(main_frame, bg=self.colors['bg'], relief='sunken', bd=2)
+            preview_frame.pack(fill="both", expand=True, pady=(0, 15))
+            
+            tk.Label(preview_frame, text="Preview:", bg=self.colors['bg'], 
+                    fg=self.colors['text'], font=('Segoe UI', 10, 'bold')).pack(pady=5)
+            
+            try:
+                # Load and resize image for preview
+                img = Image.open(image_path)
+                # Calculate preview size (max 400x300)
+                img_width, img_height = img.size
+                max_width, max_height = 400, 300
+                ratio = min(max_width/img_width, max_height/img_height)
+                new_width = int(img_width * ratio)
+                new_height = int(img_height * ratio)
+                
+                img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(img)
+                
+                canvas = Canvas(preview_frame, width=new_width, height=new_height, 
+                              bg=self.colors['bg'], highlightthickness=0)
+                canvas.pack(pady=5)
+                canvas.create_image(new_width//2, new_height//2, image=photo, anchor="center")
+                canvas.image = photo  # Keep reference
+                
+                # File info
+                file_size = os.path.getsize(image_path)
+                size_mb = file_size / (1024*1024)
+                info_text = f"Size: {img_width}x{img_height} * {size_mb:.1f} MB"
+                tk.Label(preview_frame, text=info_text, bg=self.colors['bg'], 
+                        fg=self.colors['text_secondary'], font=('Segoe UI', 8)).pack()
+                
+            except Exception as e:
+                tk.Label(preview_frame, text=f"Preview not available: {str(e)[:50]}...", 
+                        bg=self.colors['bg'], fg=self.colors['text_secondary']).pack(pady=20)
+                
+        elif video_path and os.path.exists(video_path):
+            preview_frame = tk.Frame(main_frame, bg=self.colors['bg'], relief='sunken', bd=2)
+            preview_frame.pack(fill="both", expand=True, pady=(0, 15))
+            
+            tk.Label(preview_frame, text="Video Preview:", bg=self.colors['bg'], 
+                    fg=self.colors['text'], font=('Segoe UI', 10, 'bold')).pack(pady=5)
+            
+            try:
+                if VIDEO_SUPPORT:
+                    # Get video info and first frame
+                    cap = cv2.VideoCapture(video_path)
+                    ret, frame = cap.read()
+                    
+                    if ret:
+                        # Convert frame to RGB and create preview
+                        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        img = Image.fromarray(frame_rgb)
+                        
+                        # Calculate preview size
+                        img_width, img_height = img.size
+                        max_width, max_height = 400, 300
+                        ratio = min(max_width/img_width, max_height/img_height)
+                        new_width = int(img_width * ratio)
+                        new_height = int(img_height * ratio)
+                        
+                        img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                        photo = ImageTk.PhotoImage(img)
+                        
+                        canvas = Canvas(preview_frame, width=new_width, height=new_height, 
+                                      bg=self.colors['bg'], highlightthickness=0)
+                        canvas.pack(pady=5)
+                        canvas.create_image(new_width//2, new_height//2, image=photo, anchor="center")
+                        canvas.image = photo
+                        
+                        # Video info
+                        fps = cap.get(cv2.CAP_PROP_FPS)
+                        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                        duration = total_frames / fps if fps > 0 else 0
+                        file_size = os.path.getsize(video_path) / (1024*1024)
+                        
+                        info_text = f"Size: {img_width}x{img_height} * {fps:.1f}fps * {duration:.1f}s * {file_size:.1f}MB"
+                        tk.Label(preview_frame, text=info_text, bg=self.colors['bg'], 
+                                fg=self.colors['text_secondary'], font=('Segoe UI', 8)).pack()
+                    
+                    cap.release()
+                else:
+                    tk.Label(preview_frame, text="Video preview requires OpenCV", 
+                            bg=self.colors['bg'], fg=self.colors['text_secondary']).pack(pady=20)
+                    
+            except Exception as e:
+                tk.Label(preview_frame, text=f"Video preview not available: {str(e)[:50]}...", 
+                        bg=self.colors['bg'], fg=self.colors['text_secondary']).pack(pady=20)
+        
+        # Button frame
+        button_frame = tk.Frame(main_frame, bg=self.colors['card_bg'])
+        button_frame.pack(fill="x", pady=(0, 0))
+        
+        tk.Button(button_frame, text="OK", command=win.destroy, bg=self.colors['success'], 
+                 fg='white', font=('Segoe UI', 10), relief='flat', padx=30, pady=8).pack(side="right")
+        
+        # Set window size based on content
+        win.geometry("600x500")
+
+    def _show_extraction_result_with_preview(self, message, extracted_path, extracted_text=None):
+        """Show extraction result with preview and text if available"""
+        win = tk.Toplevel(self)
+        win.title("Extraction Result - Preview")
+        win.configure(bg=self.colors['card_bg'])
+        win.resizable(True, True)
+        
+        # Center on parent
+        win.transient(self)
+        win.grab_set()
+        
+        # Main container
+        main_frame = tk.Frame(win, bg=self.colors['card_bg'])
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Success message
+        tk.Label(main_frame, text="SUCCESS: Watermark Extracted", bg=self.colors['card_bg'], 
+                fg=self.colors['success'], font=('Segoe UI', 14, 'bold')).pack(pady=(0, 10))
+        
+        tk.Label(main_frame, text=message, bg=self.colors['card_bg'], 
+                fg=self.colors['text'], font=('Segoe UI', 10), wraplength=500).pack(pady=(0, 15))
+        
+        # Text display if available
+        if extracted_text:
+            text_frame = tk.Frame(main_frame, bg=self.colors['bg'], relief='sunken', bd=2)
+            text_frame.pack(fill="x", pady=(0, 15))
+            
+            tk.Label(text_frame, text="Extracted Text:", bg=self.colors['bg'], 
+                    fg=self.colors['text'], font=('Segoe UI', 10, 'bold')).pack(pady=5, anchor="w")
+            
+            # Text display area
+            text_display = tk.Text(text_frame, height=3, bg=self.colors['card_bg'], 
+                                 fg=self.colors['accent'], font=('Segoe UI', 12, 'bold'),
+                                 relief='flat', wrap='word', state='disabled')
+            text_display.pack(fill="x", padx=10, pady=5)
+            
+            # Insert text
+            text_display.config(state='normal')
+            text_display.insert('1.0', extracted_text)
+            text_display.config(state='disabled')
+        
+        # Preview section
+        if extracted_path and os.path.exists(extracted_path):
+            preview_frame = tk.Frame(main_frame, bg=self.colors['bg'], relief='sunken', bd=2)
+            preview_frame.pack(fill="both", expand=True, pady=(0, 15))
+            
+            tk.Label(preview_frame, text="Extracted Watermark Preview:", bg=self.colors['bg'], 
+                    fg=self.colors['text'], font=('Segoe UI', 10, 'bold')).pack(pady=5)
+            
+            try:
+                # Load and resize image for preview
+                img = Image.open(extracted_path)
+                # Calculate preview size (max 400x300)
+                img_width, img_height = img.size
+                max_width, max_height = 400, 300
+                ratio = min(max_width/img_width, max_height/img_height)
+                new_width = int(img_width * ratio)
+                new_height = int(img_height * ratio)
+                
+                img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(img)
+                
+                canvas = Canvas(preview_frame, width=new_width, height=new_height, 
+                              bg=self.colors['bg'], highlightthickness=0)
+                canvas.pack(pady=5)
+                canvas.create_image(new_width//2, new_height//2, image=photo, anchor="center")
+                canvas.image = photo  # Keep reference
+                
+                # File info
+                file_size = os.path.getsize(extracted_path)
+                size_kb = file_size / 1024
+                info_text = f"Size: {img_width}x{img_height} * {size_kb:.1f} KB"
+                tk.Label(preview_frame, text=info_text, bg=self.colors['bg'], 
+                        fg=self.colors['text_secondary'], font=('Segoe UI', 8)).pack()
+                
+            except Exception as e:
+                tk.Label(preview_frame, text=f"Preview not available: {str(e)[:50]}...", 
+                        bg=self.colors['bg'], fg=self.colors['text_secondary']).pack(pady=20)
+        
+        # Button frame
+        button_frame = tk.Frame(main_frame, bg=self.colors['card_bg'])
+        button_frame.pack(fill="x", pady=(0, 0))
+        
+        tk.Button(button_frame, text="OK", command=win.destroy, bg=self.colors['success'], 
+                 fg='white', font=('Segoe UI', 10), relief='flat', padx=30, pady=8).pack(side="right")
+        
+        # Set window size based on content
+        window_height = 600 if extracted_text else 500
+        win.geometry(f"600x{window_height}")
+
     def _show_success(self, message):
-        """Show success message with modern styling"""
+        """Show basic success message with modern styling"""
         win = tk.Toplevel(self)
         win.title("Success")
         win.geometry("400x150")
