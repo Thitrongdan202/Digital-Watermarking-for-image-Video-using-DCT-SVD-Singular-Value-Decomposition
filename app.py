@@ -1,229 +1,378 @@
 # app.py
-import io, json, zlib
-from pathlib import Path
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
-from PIL import Image, ImageTk
+import os, sys, json, cv2
+import numpy as np
 
-from payload_qim import (
-    embed_to_image, embed_to_video,
-    extract_from_image, extract_from_video
+# --- GUI: ưu tiên PyQt5, fallback PySide6 nếu cần ---
+try:
+    from PyQt5.QtCore import Qt, QSize
+    from PyQt5.QtGui import QPixmap, QImage
+    from PyQt5.QtWidgets import (
+        QApplication, QMainWindow, QWidget, QTabWidget, QFileDialog, QMessageBox,
+        QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QGroupBox,
+        QRadioButton, QPlainTextEdit, QSpinBox, QSlider, QButtonGroup
+    )
+except Exception:
+    from PySide6.QtCore import Qt, QSize
+    from PySide6.QtGui import QPixmap, QImage
+    from PySide6.QtWidgets import (
+        QApplication, QMainWindow, QWidget, QTabWidget, QFileDialog, QMessageBox,
+        QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QGroupBox,
+        QRadioButton, QPlainTextEdit, QSpinBox, QSlider, QButtonGroup
+    )
+
+# --- Backend mới: imwatermark ---
+from payload_dwt_dct_svd import (
+    embed_into_image, extract_from_image,
+    embed_into_video, extract_from_video
 )
 
-# -------------------------- helpers --------------------------
-def is_image(p: str) -> bool:
-    return Path(p).suffix.lower() in [".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"]
+APP_TITLE = "DCT-SVD Watermarking (imwatermark payload)"
 
-def is_video(p: str) -> bool:
-    return Path(p).suffix.lower() in [".avi", ".mp4", ".mov", ".mkv", ".wmv", ".m4v"]
+IMG_EXTS  = ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff')
+VID_EXTS  = ('.avi', '.mp4', '.mov', '.mkv', '.webm', '.wmv', '.m4v')
 
-def map_strength_to_delta(alpha: float) -> float:
-    # QIM step (Δ). Tăng nhẹ để bền hơn trước nén/biến đổi.
-    return 2.2 + float(alpha) * 12.0
+def is_image(path:str)->bool:
+    return path and path.lower().endswith(IMG_EXTS)
 
-# -------------------------- GUI --------------------------
-class App(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.title("DCT-SVD Watermarking (QIM payload)")
-        self.geometry("1080x640")
+def is_video(path:str)->bool:
+    return path and path.lower().endswith(VID_EXTS)
 
-        nb = ttk.Notebook(self)
-        self.tab_embed = ttk.Frame(nb)
-        self.tab_detect = ttk.Frame(nb)
-        nb.add(self.tab_embed, text="EMBED")
-        nb.add(self.tab_detect, text="DETECT")
-        nb.pack(fill="both", expand=True)
+def cv2_to_qpixmap(bgr: np.ndarray) -> QPixmap:
+    if bgr is None: return QPixmap()
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    h, w, c = rgb.shape
+    qimg = QImage(rgb.data, w, h, c*w, QImage.Format_RGB888)
+    return QPixmap.fromImage(qimg)
 
-        # ---------- EMBED ----------
-        # host
-        frmH = ttk.LabelFrame(self.tab_embed, text="Host Media")
-        frmH.pack(fill="x", padx=8, pady=6)
-        self.host_path = tk.StringVar()
-        ttk.Button(frmH, text="Browse", command=self._pick_host).pack(side="left", padx=6, pady=6)
-        ttk.Entry(frmH, textvariable=self.host_path).pack(side="left", fill="x", expand=True, padx=6, pady=6)
+def first_frame_of_video(path:str):
+    cap = cv2.VideoCapture(path)
+    if not cap.isOpened(): return None
+    ok, frame = cap.read()
+    cap.release()
+    return frame if ok else None
 
-        # payload area
-        frmP = ttk.LabelFrame(self.tab_embed, text="Payload")
-        frmP.pack(fill="x", padx=8, pady=6)
 
-        self.pl_type = tk.StringVar(value="text")
-        row = ttk.Frame(frmP); row.pack(fill="x", padx=4, pady=2)
-        ttk.Label(row, text="Type:").pack(side="left")
-        for k, v in [("Text", "text"), ("Image", "image"), ("JSON", "json"), ("File", "file")]:
-            ttk.Radiobutton(row, text=k, value=v, variable=self.pl_type).pack(side="left", padx=6)
+# ---------------- EMBED TAB ----------------
+class EmbedTab(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._build_ui()
 
-        self.ent_text = tk.Text(frmP, height=5)
-        self.ent_text.pack(fill="both", padx=6, pady=6)
+    def _build_ui(self):
+        main = QVBoxLayout(self)
 
-        # For image / file path
-        row2 = ttk.Frame(frmP); row2.pack(fill="x", padx=4, pady=2)
-        self.payload_path = tk.StringVar()
-        ttk.Button(row2, text="Pick payload file", command=self._pick_payload).pack(side="left")
-        ttk.Entry(row2, textvariable=self.payload_path).pack(side="left", fill="x", expand=True, padx=6)
+        # Host media
+        grp_host = QGroupBox("Host Media")
+        lh = QHBoxLayout(grp_host)
+        self.ed_host = QLineEdit()
+        btn_browse_host = QPushButton("Browse")
+        btn_browse_host.clicked.connect(self.on_browse_host)
+        lh.addWidget(btn_browse_host, 0)
+        lh.addWidget(self.ed_host, 1)
 
-        # Strength & frame interval
-        frmS = ttk.LabelFrame(self.tab_embed, text="Settings")
-        frmS.pack(fill="x", padx=8, pady=6)
-        self.strength = tk.DoubleVar(value=0.12)  # 0..1
-        ttk.Label(frmS, text="Watermark Strength").pack(side="left", padx=8)
-        ttk.Scale(frmS, from_=0.02, to=0.5, variable=self.strength, orient="horizontal", length=220).pack(side="left")
-        ttk.Label(frmS, text="Frame interval (video)").pack(side="left", padx=10)
-        self.fint = tk.IntVar(value=1)
-        ttk.Spinbox(frmS, from_=1, to=10, textvariable=self.fint, width=6).pack(side="left")
+        # Preview host
+        self.lb_preview = QLabel("Preview sẽ hiển thị ở đây")
+        self.lb_preview.setFixedHeight(320)
+        self.lb_preview.setAlignment(Qt.AlignCenter)
+        self.lb_preview.setStyleSheet("QLabel{border:1px solid #777;}")
 
-        # embed button
-        self.embed_btn = ttk.Button(self.tab_embed, text="EMBED WATERMARK", command=self._do_embed)
-        self.embed_btn.pack(pady=10)
-        self.embed_prog = ttk.Progressbar(self.tab_embed, length=360, mode="determinate")
-        self.embed_prog.pack(pady=2)
+        # Payload type
+        grp_payload = QGroupBox("Payload")
+        pv = QVBoxLayout(grp_payload)
 
-        # ---------- DETECT ----------
-        frmD = ttk.LabelFrame(self.tab_detect, text="Watermarked Media")
-        frmD.pack(fill="x", padx=8, pady=6)
-        self.water_path = tk.StringVar()
-        ttk.Button(frmD, text="Browse", command=self._pick_stego).pack(side="left", padx=6, pady=6)
-        ttk.Entry(frmD, textvariable=self.water_path).pack(side="left", fill="x", expand=True, padx=6, pady=6)
+        # radio buttons
+        row = QHBoxLayout()
+        self.rb_text = QRadioButton("Text")
+        self.rb_json = QRadioButton("JSON")
+        self.rb_img  = QRadioButton("Image")
+        self.rb_text.setChecked(True)
+        row.addWidget(self.rb_text); row.addWidget(self.rb_json); row.addWidget(self.rb_img)
+        pv.addLayout(row)
 
-        frmDS = ttk.LabelFrame(self.tab_detect, text="Detect Settings")
-        frmDS.pack(fill="x", padx=8, pady=6)
-        self.det_strength = tk.DoubleVar(value=0.12)
-        ttk.Label(frmDS, text="Strength (same as embed)").pack(side="left", padx=8)
-        ttk.Scale(frmDS, from_=0.02, to=0.5, variable=self.det_strength, orient="horizontal", length=220).pack(side="left")
-        ttk.Label(frmDS, text="Frame interval").pack(side="left", padx=10)
-        self.det_fint = tk.IntVar(value=1)
-        ttk.Spinbox(frmDS, from_=1, to=10, textvariable=self.det_fint, width=6).pack(side="left")
+        # text/json editor
+        self.ed_payload = QPlainTextEdit()
+        self.ed_payload.setPlaceholderText("Nhập text / JSON tại đây…")
+        pv.addWidget(self.ed_payload)
 
-        self.detect_btn = ttk.Button(self.tab_detect, text="DETECT WATERMARK", command=self._do_detect)
-        self.detect_btn.pack(pady=10)
-        self.detect_prog = ttk.Progressbar(self.tab_detect, length=360, mode="determinate"); self.detect_prog.pack()
+        # payload image path
+        row2 = QHBoxLayout()
+        self.ed_payload_img = QLineEdit()
+        self.ed_payload_img.setPlaceholderText("Đường dẫn payload ảnh (PNG/JPG)…")
+        btn_browse_payload_img = QPushButton("Browse")
+        btn_browse_payload_img.clicked.connect(self.on_browse_payload_img)
+        row2.addWidget(btn_browse_payload_img, 0)
+        row2.addWidget(self.ed_payload_img, 1)
+        pv.addLayout(row2)
 
-        self.preview = ttk.LabelFrame(self.tab_detect, text="Preview / Results")
-        self.preview.pack(fill="both", expand=True, padx=8, pady=6)
-        self.preview_canvas = tk.Label(self.preview)
-        self.preview_canvas.pack(padx=6, pady=6)
+        # Strength + Frame interval
+        grp_set = QGroupBox("Settings")
+        ls = QHBoxLayout(grp_set)
+        self.lb_strength = QLabel("Strength: 0.12")
+        self.sl_strength = QSlider(Qt.Horizontal)
+        self.sl_strength.setMinimum(5)   # 0.05
+        self.sl_strength.setMaximum(30)  # 0.30
+        self.sl_strength.setValue(12)    # 0.12
+        self.sl_strength.valueChanged.connect(self._on_strength_change)
+        ls.addWidget(self.lb_strength)
+        ls.addWidget(self.sl_strength)
 
-    # -------------- callbacks --------------
-    def _pick_host(self):
-        p = filedialog.askopenfilename(title="Pick host image/video")
-        if p: self.host_path.set(p)
+        self.lb_interval = QLabel("Frame interval (video):")
+        self.sp_interval = QSpinBox()
+        self.sp_interval.setMinimum(1)
+        self.sp_interval.setMaximum(60)
+        self.sp_interval.setValue(1)
+        ls.addWidget(self.lb_interval)
+        ls.addWidget(self.sp_interval)
 
-    def _pick_payload(self):
-        p = filedialog.askopenfilename(title="Pick payload file (image/json/any)")
-        if p: self.payload_path.set(p)
+        # Output
+        grp_out = QGroupBox("Output")
+        lo = QHBoxLayout(grp_out)
+        self.ed_out = QLineEdit()
+        self.ed_out.setPlaceholderText("Đường dẫn file xuất (để trống: tự động *_stego.png / *_stego.avi)")
+        btn_browse_out = QPushButton("Save As")
+        btn_browse_out.clicked.connect(self.on_browse_out)
+        lo.addWidget(btn_browse_out, 0)
+        lo.addWidget(self.ed_out, 1)
 
-    def _pick_stego(self):
-        p = filedialog.askopenfilename(title="Pick watermarked media")
-        if p: self.water_path.set(p)
+        # Button embed
+        btn_embed = QPushButton("EMBED WATERMARK")
+        btn_embed.clicked.connect(self.on_embed)
 
-    def _payload_bytes(self):
-        t = self.pl_type.get()
-        if t == "text":
-            data = self.ent_text.get("1.0", "end").encode("utf-8")
-            mime = "text/plain"; name = "message.txt"
-        elif t == "json":
-            raw = self.ent_text.get("1.0", "end")
-            try:
-                # normalize JSON
-                data = json.dumps(json.loads(raw), ensure_ascii=False).encode("utf-8")
-            except Exception:
-                data = raw.encode("utf-8")
-            mime = "application/json"; name = "data.json"
-        elif t == "image":
-            f = self.payload_path.get()
-            if not f: raise ValueError("Please choose payload image")
-            data = Path(f).read_bytes()
-            mime = "image/" + Path(f).suffix.lower().strip(".")
-            name = Path(f).name
-        else:  # file
-            f = self.payload_path.get()
-            if not f: raise ValueError("Please choose payload file")
-            data = Path(f).read_bytes()
-            mime = "application/octet-stream"; name = Path(f).name
-        return name, mime, data
+        main.addWidget(grp_host)
+        main.addWidget(self.lb_preview)
+        main.addWidget(grp_payload)
+        main.addWidget(grp_set)
+        main.addWidget(grp_out)
+        main.addWidget(btn_embed)
 
-    def _do_embed(self):
-        host = self.host_path.get().strip()
-        if not host:
-            messagebox.showwarning("Embed", "Pick a host image/video"); return
-        if not (is_image(host) or is_video(host)):
-            messagebox.showwarning("Embed", "Unsupported host"); return
+        # default visibility
+        self._sync_payload_inputs()
 
-        try:
-            name, mime, data = self._payload_bytes()
-        except Exception as ex:
-            messagebox.showerror("Embed", str(ex)); return
+        # when radio changed, sync widgets
+        self.rb_text.toggled.connect(self._sync_payload_inputs)
+        self.rb_json.toggled.connect(self._sync_payload_inputs)
+        self.rb_img.toggled.connect(self._sync_payload_inputs)
 
-        # output path: image->PNG (lossless), video->AVI (MJPG)
-        host_p = Path(host)
-        if is_image(host):
-            out = host_p.with_name(host_p.stem + "_stego.png")
+    # UI helpers
+    def _on_strength_change(self, v):
+        self.lb_strength.setText(f"Strength: {v/100:.2f}")
+
+    def _sync_payload_inputs(self):
+        is_img = self.rb_img.isChecked()
+        self.ed_payload.setEnabled(not is_img)
+        self.ed_payload_img.setEnabled(is_img)
+
+    def on_browse_host(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Chọn host media", "",
+                    "Media (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.avi *.mp4 *.mov *.mkv *.webm *.wmv *.m4v)")
+        if not path: return
+        self.ed_host.setText(path)
+        # preview
+        if is_image(path):
+            pix = QPixmap(path)
+            self.lb_preview.setPixmap(pix.scaled(self.lb_preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        elif is_video(path):
+            f = first_frame_of_video(path)
+            self.lb_preview.setPixmap(cv2_to_qpixmap(f).scaled(self.lb_preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
         else:
-            out = host_p.with_name(host_p.stem + "_stego.avi")
+            self.lb_preview.setText("Không hỗ trợ định dạng này.")
 
-        delta = map_strength_to_delta(self.strength.get())
-        fint = int(self.fint.get())
+    def on_browse_payload_img(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Chọn ảnh payload", "", "Image (*.png *.jpg *.jpeg)")
+        if path:
+            self.ed_payload_img.setText(path)
 
-        self.embed_btn.config(state="disabled"); self.embed_prog.config(value=10)
+    def on_browse_out(self):
+        # chỉ chọn thư mục/filename – nhưng để đơn giản, cho chọn file tuỳ ý
+        path, _ = QFileDialog.getSaveFileName(self, "Chọn đường dẫn xuất", "", "All (*.*)")
+        if path:
+            self.ed_out.setText(path)
+
+    def _strength(self) -> float:
+        return self.sl_strength.value()/100.0
+
+    def on_embed(self):
+        host = self.ed_host.text().strip()
+        if not os.path.isfile(host):
+            QMessageBox.warning(self, "Lỗi", "Vui lòng chọn host media hợp lệ.")
+            return
+
+        # xác định kind & payload
+        if self.rb_text.isChecked():
+            kind = 'text'
+            payload = self.ed_payload.toPlainText()
+        elif self.rb_json.isChecked():
+            kind = 'json'
+            txt = self.ed_payload.toPlainText().strip()
+            # chấp nhận text JSON hoặc bạn tự nhập text (sẽ tự parse)
+            try:
+                json.loads(txt)  # validate
+            except Exception as e:
+                QMessageBox.warning(self, "Lỗi", f"JSON không hợp lệ:\n{e}")
+                return
+            payload = txt
+        else:
+            kind = 'image'
+            pimg = self.ed_payload_img.text().strip()
+            if not os.path.isfile(pimg):
+                QMessageBox.warning(self, "Lỗi", "Vui lòng chọn payload ảnh hợp lệ.")
+                return
+            payload = pimg
+
+        out = self.ed_out.text().strip()
+        strength = self._strength()
+        interval = self.sp_interval.value()
+
         try:
             if is_image(host):
-                info = embed_to_image(str(host_p), str(out),
-                                      payload={"name": name, "mime": mime, "data": data},
-                                      delta=delta)
+                out_path = out or (os.path.splitext(host)[0] + "_stego.png")
+                out_path = embed_into_image(host, out_path, kind=kind, payload=payload, strength=strength)
+            elif is_video(host):
+                out_path = out or (os.path.splitext(host)[0] + "_stego.avi")
+                out_path = embed_into_video(host, out_path, kind=kind, payload=payload,
+                                            strength=strength, frame_interval=interval)
             else:
-                info = embed_to_video(str(host_p), str(out),
-                                      payload={"name": name, "mime": mime, "data": data},
-                                      delta=delta, frame_interval=fint)
-            self.embed_prog.config(value=100)
-            messagebox.showinfo("Embed", f"Done!\nOutput: {out}\nInfo: {info}")
-        except Exception as ex:
-            messagebox.showerror("Embed", f"Failed:\n{ex}")
-        finally:
-            self.embed_btn.config(state="normal"); self.embed_prog.config(value=0)
+                QMessageBox.warning(self, "Lỗi", "Định dạng host không hỗ trợ.")
+                return
 
-    def _preview_extracted(self, fpath: str):
-        self.preview_canvas.configure(image="", text="")
-        p = Path(fpath)
-        ext = p.suffix.lower()
-        try:
-            if ext in [".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff"]:
-                im = Image.open(p)
-                im.thumbnail((640, 480))
-                imtk = ImageTk.PhotoImage(im)
-                self.preview_canvas.image = imtk
-                self.preview_canvas.configure(image=imtk)
-            elif ext in [".txt", ".json", ".md", ".csv", ".ini"]:
-                txt = p.read_text(encoding="utf-8", errors="ignore")
-                if len(txt) > 1200: txt = txt[:1200] + "\n...(truncated)"
-                self.preview_canvas.configure(text=txt, anchor="nw", justify="left")
-            else:
-                self.preview_canvas.configure(text=str(p))
-        except Exception as ex:
-            self.preview_canvas.configure(text=f"{p}\n{ex}")
+            QMessageBox.information(self, "Thành công",
+                f"Đã nhúng watermark!\nFile xuất:\n{out_path}")
+            # preview stego
+            if is_image(out_path):
+                pix = QPixmap(out_path)
+                self.lb_preview.setPixmap(pix.scaled(self.lb_preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            elif is_video(out_path):
+                f = first_frame_of_video(out_path)
+                self.lb_preview.setPixmap(cv2_to_qpixmap(f).scaled(self.lb_preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
-    def _do_detect(self):
-        stego = self.water_path.get().strip()
-        if not stego:
-            messagebox.showwarning("Detect", "Pick stego image/video"); return
-        if not (is_image(stego) or is_video(stego)):
-            messagebox.showwarning("Detect", "Unsupported media"); return
+        except Exception as e:
+            QMessageBox.critical(self, "Embed thất bại", str(e))
 
-        delta = map_strength_to_delta(self.det_strength.get())
-        fint = int(self.det_fint.get())
 
-        self.detect_btn.config(state="disabled"); self.detect_prog.config(value=10)
+# ---------------- DETECT TAB ----------------
+class DetectTab(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._build_ui()
+
+    def _build_ui(self):
+        main = QVBoxLayout(self)
+
+        # Stego media
+        grp_host = QGroupBox("Watermarked Media")
+        lh = QHBoxLayout(grp_host)
+        self.ed_stego = QLineEdit()
+        btn_browse = QPushButton("Browse")
+        btn_browse.clicked.connect(self.on_browse)
+        lh.addWidget(btn_browse, 0)
+        lh.addWidget(self.ed_stego, 1)
+
+        # Settings
+        grp_set = QGroupBox("Detect Settings")
+        ls = QHBoxLayout(grp_set)
+        self.lb_strength = QLabel("Strength (≈ lúc embed): 0.12")
+        self.sl_strength = QSlider(Qt.Horizontal)
+        self.sl_strength.setMinimum(5)
+        self.sl_strength.setMaximum(30)
+        self.sl_strength.setValue(12)
+        self.sl_strength.valueChanged.connect(self._on_strength_change)
+        ls.addWidget(self.lb_strength)
+        ls.addWidget(self.sl_strength)
+
+        self.lb_interval = QLabel("Frame interval:")
+        self.sp_interval = QSpinBox()
+        self.sp_interval.setMinimum(1)
+        self.sp_interval.setMaximum(60)
+        self.sp_interval.setValue(1)
+        ls.addWidget(self.lb_interval)
+        ls.addWidget(self.sp_interval)
+
+        # Preview / results
+        self.lb_preview = QLabel("Preview / Results")
+        self.lb_preview.setFixedHeight(320)
+        self.lb_preview.setAlignment(Qt.AlignCenter)
+        self.lb_preview.setStyleSheet("QLabel{border:1px solid #777;}")
+
+        # Detect button
+        btn_detect = QPushButton("DETECT WATERMARK")
+        btn_detect.clicked.connect(self.on_detect)
+
+        main.addWidget(grp_host)
+        main.addWidget(grp_set)
+        main.addWidget(self.lb_preview)
+        main.addWidget(btn_detect)
+
+    def _on_strength_change(self, v):
+        self.lb_strength.setText(f"Strength (≈ lúc embed): {v/100:.2f}")
+
+    def on_browse(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Chọn stego media", "",
+                    "Media (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.avi *.mp4 *.mov *.mkv *.webm *.wmv *.m4v)")
+        if path:
+            self.ed_stego.setText(path)
+
+    def _strength(self) -> float:
+        return self.sl_strength.value()/100.0
+
+    def on_detect(self):
+        stego = self.ed_stego.text().strip()
+        if not os.path.isfile(stego):
+            QMessageBox.warning(self, "Lỗi", "Vui lòng chọn stego media hợp lệ.")
+            return
+
+        strength = self._strength()
+        interval = self.sp_interval.value()
+        save_dir = os.path.splitext(stego)[0] + "_extracted"
+
         try:
             if is_image(stego):
-                out_file = extract_from_image(stego_path=stego, save_dir=None, delta=delta)
+                payload_file = extract_from_image(stego, save_dir, strength=strength)
+            elif is_video(stego):
+                payload_file = extract_from_video(stego, save_dir, strength=strength, frame_interval=interval)
             else:
-                out_file = extract_from_video(stego_path=stego, save_dir=None, delta=delta, frame_interval=fint)
-            self.detect_prog.config(value=100)
-            self._preview_extracted(out_file)
-            messagebox.showinfo("Detect", f"Recovered payload:\n{out_file}")
-        except Exception as ex:
-            messagebox.showerror("Detect", f"Failed:\n{ex}")
-        finally:
-            self.detect_btn.config(state="normal"); self.detect_prog.config(value=0)
+                QMessageBox.warning(self, "Lỗi", "Định dạng stego không hỗ trợ.")
+                return
+
+            # show result
+            ext = os.path.splitext(payload_file)[1].lower()
+            if ext in ('.txt', '.json'):
+                with open(payload_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    txt = f.read()
+                # hiển thị 1 phần nếu quá dài
+                if len(txt) > 3000:
+                    txt = txt[:3000] + "\n...\n(truncated)"
+                self.lb_preview.setText(txt)
+            elif ext in ('.png', '.jpg', '.jpeg'):
+                pix = QPixmap(payload_file)
+                self.lb_preview.setPixmap(pix.scaled(self.lb_preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            else:
+                self.lb_preview.setText(f"Đã lưu payload:\n{payload_file}")
+
+            QMessageBox.information(self, "Detect xong",
+                f"Đã khôi phục payload:\n{payload_file}")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Detect thất bại", str(e))
+
+
+# ---------------- Main Window ----------------
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle(APP_TITLE)
+        self.resize(980, 680)
+
+        tabs = QTabWidget()
+        tabs.addTab(EmbedTab(), "EMBED")
+        tabs.addTab(DetectTab(), "DETECT")
+        self.setCentralWidget(tabs)
+
+
+def main():
+    app = QApplication(sys.argv)
+    w = MainWindow()
+    w.show()
+    sys.exit(app.exec())
 
 if __name__ == "__main__":
-    App().mainloop()
+    main()
