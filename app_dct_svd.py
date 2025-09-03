@@ -2,7 +2,7 @@
 # app_dct_svd.py
 # Same 3-tab UI (EMBED / EXTRACT / DETECT), but strictly DCT–SVD for IMAGES.
 # - Only watermark IMAGE is supported (PNG/JPG).
-# - Video not supported (UI unchanged layout).
+# - Video not supported .
 
 import os, sys, json
 from pathlib import Path
