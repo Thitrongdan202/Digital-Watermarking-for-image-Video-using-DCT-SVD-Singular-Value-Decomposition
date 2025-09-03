@@ -46,7 +46,7 @@ def _to_payload_bytes(payload, kind: str) -> bytes:
     blob = header + comp + zlib.crc32(comp).to_bytes(4, 'big')
     if len(blob) > MAX_BYTES:
         raise ValueError(f'Payload quá lớn ({len(blob)}B) > MAX_BYTES={MAX_BYTES}. Tăng MAX_BYTES hoặc rút gọn.')
-    return blob + b'\x00' * (MAX_BYTES - len(blob))
+    return blob
 
 def _from_payload_bytes(blob: bytes):
     if len(blob) < 16 or not blob.startswith(MAGIC):
@@ -316,3 +316,48 @@ def extract_from_video(stego_video: str, save_dir: str, strength: float = 0.12, 
     with open(out, 'wb') as f:
         f.write(raw)
     return out
+
+
+# --------------- DETECT (presence only, no file writes) ----------------
+def detect_in_image(stego_path: str, strength: float = 0.12) -> bool:
+    """Trả về True nếu nghi ngờ có watermark (tìm thấy MAGIC) trong ảnh."""
+    bgr = cv2.imread(stego_path, cv2.IMREAD_COLOR)
+    if bgr is None:
+        raise ValueError(f'Không mở được ảnh: {stego_path}')
+    YCrCb = cv2.cvtColor(bgr, cv2.COLOR_BGR2YCrCb).astype(np.float32)
+    Y = YCrCb[:,:,0]
+    LL, (LH, HL, HH) = pywt.dwt2(Y, WAVELET)
+    med = _median_s0(LH, BLOCK)
+    delta = _delta_from_strength(strength, med)
+    cap_bits = (LH.shape[0]//BLOCK)*(LH.shape[1]//BLOCK)
+    bits = _extract_bits_from_subband(LH, cap_bits, delta, BLOCK)
+    stream, idx, need = _unrepeat3_try_find_magic(bits)
+    return stream is not None
+
+def detect_in_video(stego_video: str, strength: float = 0.12, frame_interval: int = 1) -> bool:
+    """Trả về True nếu nghi ngờ có watermark (tìm thấy MAGIC) trong một khung của video."""
+    cap = cv2.VideoCapture(stego_video)
+    if not cap.isOpened():
+        raise ValueError(f'Không mở được video: {stego_video}')
+    fid = 0
+    bits_acc = []
+    present = False
+    while True:
+        ok, frame = cap.read()
+        if not ok: break
+        if (fid % max(1, frame_interval)) == 0:
+            YCrCb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb).astype(np.float32)
+            Y = YCrCb[:,:,0]
+            LL, (LH, HL, HH) = pywt.dwt2(Y, WAVELET)
+            med = _median_s0(LH, BLOCK)
+            delta = _delta_from_strength(strength, med)
+            cap_bits = (LH.shape[0]//BLOCK)*(LH.shape[1]//BLOCK)
+            bits = _extract_bits_from_subband(LH, cap_bits, delta, BLOCK)
+            bits_acc.extend(bits.tolist())
+            stream, idx, need = _unrepeat3_try_find_magic(np.array(bits_acc, dtype=np.uint8))
+            if stream is not None:
+                present = True
+                break
+        fid += 1
+    cap.release()
+    return present
