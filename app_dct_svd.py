@@ -1,41 +1,29 @@
-# app_dct_svd.py
-# Same 3-tab UI (EMBED / EXTRACT / DETECT), but strictly DCT–SVD for IMAGES.
-# - Only watermark IMAGE is supported (PNG/JPG).
-# - Video not supported .
-
+# app_dct_svd.py (extended for color + text/JSON)
 import os, sys, json
+import cv2
+import numpy as np
 from pathlib import Path
-
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QLineEdit, QPushButton, QFileDialog,
     QHBoxLayout, QVBoxLayout, QGroupBox, QSlider, QPlainTextEdit, QRadioButton,
-    QMessageBox, QSpinBox, QTabWidget, QMainWindow
+    QMessageBox, QSpinBox, QTabWidget, QMainWindow, QCheckBox
 )
+from dct_svd_core import embed as embed_core, extract as extract_core, detect as detect_core
 
-import cv2
-import numpy as np
-from dct_svd_core import embed as embed_dctsvd, extract as extract_dctsvd, detect as detect_dctsvd
+APP_TITLE = "DCT–SVD Watermarking (Images, Text, JSON)"
 
-APP_TITLE = "DCT–SVD Watermarking (image only)"
-
-# ---------- Small helpers ----------
 def is_image(path: str) -> bool:
-    ext = os.path.splitext(path)[1].lower()
-    return ext in (".png",".jpg",".jpeg",".bmp",".tif",".tiff")
+    return os.path.splitext(path)[1].lower() in (".png",".jpg",".jpeg",".bmp",".tif",".tiff")
 
-def cv2_to_qpixmap(img_bgr: np.ndarray) -> QPixmap:
+def cv2_to_qpixmap(img_bgr):
     h, w = img_bgr.shape[:2]
     rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     qimg = QImage(rgb.data, w, h, 3*w, QImage.Format_RGB888)
     return QPixmap.fromImage(qimg)
 
-def first_frame_of_image(path: str) -> np.ndarray:
-    bgr = cv2.imread(path, cv2.IMREAD_COLOR)
-    return bgr
-
-# -------------- EMBED TAB --------------
+# ------------ EMBED TAB -------------
 class EmbedTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -44,138 +32,142 @@ class EmbedTab(QWidget):
     def _build_ui(self):
         main = QVBoxLayout(self)
 
-        # Host media
-        grp_host = QGroupBox("Host Media")
+        grp_host = QGroupBox("Host Image")
         lh = QHBoxLayout(grp_host)
         self.ed_host = QLineEdit()
-        btn_browse_host = QPushButton("Browse")
-        btn_browse_host.clicked.connect(self.on_browse_host)
-        lh.addWidget(btn_browse_host, 0)
-        lh.addWidget(self.ed_host, 1)
+        btn = QPushButton("Browse")
+        btn.clicked.connect(self.on_browse_host)
+        lh.addWidget(btn, 0); lh.addWidget(self.ed_host, 1)
+        main.addWidget(grp_host)
 
-        # Preview host
         self.lb_preview = QLabel("")
         self.lb_preview.setFixedHeight(320)
         self.lb_preview.setAlignment(Qt.AlignCenter)
-        self.lb_preview.setStyleSheet("QLabel{border:1px solid #444; background:#111; color:#bbb;}")
-        main.addWidget(grp_host)
+        self.lb_preview.setStyleSheet("QLabel{border:1px solid #444;background:#111;color:#bbb;}")
         main.addWidget(self.lb_preview)
 
-        # Payload (keep UI structure, only Image used)
         grp_payload = QGroupBox("Payload")
         pv = QVBoxLayout(grp_payload)
-
         row = QHBoxLayout()
-        self.rb_text = QRadioButton("Text")
-        self.rb_json = QRadioButton("JSON")
-        self.rb_img  = QRadioButton("Image")
+        self.rb_text = QRadioButton("Text"); self.rb_json = QRadioButton("JSON"); self.rb_img = QRadioButton("Image")
         self.rb_img.setChecked(True)
         row.addWidget(self.rb_text); row.addWidget(self.rb_json); row.addWidget(self.rb_img)
         pv.addLayout(row)
 
-        # text/json editor (kept but disabled)
+        # editor for text/json
         self.ed_payload = QPlainTextEdit()
-        self.ed_payload.setPlaceholderText("DCT–SVD (ảnh) chỉ hỗ trợ watermark IMAGE.")
-        self.ed_payload.setEnabled(False)
+        self.ed_payload.setPlaceholderText("Nhập TEXT hoặc JSON tại đây (hoặc dùng Browse JSON/TXT).")
         pv.addWidget(self.ed_payload)
+        rowj = QHBoxLayout()
+        self.ed_payload_json = QLineEdit(); self.ed_payload_json.setPlaceholderText("Đường dẫn file JSON/TXT…")
+        btn_browse_json = QPushButton("Browse JSON/TXT"); btn_browse_json.clicked.connect(self.on_browse_payload_json)
+        rowj.addWidget(btn_browse_json, 0); rowj.addWidget(self.ed_payload_json, 1)
+        pv.addLayout(rowj)
 
-        # payload image path
-        row2 = QHBoxLayout()
-        self.ed_payload_img = QLineEdit()
-        self.ed_payload_img.setPlaceholderText("Đường dẫn watermark ảnh (PNG/JPG)…")
-        btn_browse_payload_img = QPushButton("Browse")
-        btn_browse_payload_img.clicked.connect(self.on_browse_payload_img)
-        row2.addWidget(btn_browse_payload_img, 0)
-        row2.addWidget(self.ed_payload_img, 1)
-        pv.addLayout(row2)
+        # image path
+        rowi = QHBoxLayout()
+        self.ed_payload_img = QLineEdit(); self.ed_payload_img.setPlaceholderText("Đường dẫn watermark IMAGE (PNG/JPG)…")
+        btn_browse_img = QPushButton("Browse Image"); btn_browse_img.clicked.connect(self.on_browse_payload_img)
+        rowi.addWidget(btn_browse_img, 0); rowi.addWidget(self.ed_payload_img, 1)
+        pv.addLayout(rowi)
 
         # Settings
         grp_set = QGroupBox("Settings")
         ls = QHBoxLayout(grp_set)
-        self.lb_strength = QLabel("Alpha: 0.05")
-        self.sl_strength = QSlider(Qt.Horizontal)
-        self.sl_strength.setMinimum(1)   # 0.01
-        self.sl_strength.setMaximum(20)  # 0.20
-        self.sl_strength.setValue(5)     # 0.05
-        self.sl_strength.valueChanged.connect(self._on_strength_change)
-        ls.addWidget(self.lb_strength)
-        ls.addWidget(self.sl_strength)
-
-        self.lb_interval = QLabel("Frame interval (video):")
-        self.sp_interval = QSpinBox(); self.sp_interval.setEnabled(False) # not used
-        ls.addWidget(self.lb_interval)
-        ls.addWidget(self.sp_interval)
+        self.lb_alpha = QLabel("Alpha: 0.05")
+        self.sl_alpha = QSlider(Qt.Horizontal); self.sl_alpha.setMinimum(1); self.sl_alpha.setMaximum(20); self.sl_alpha.setValue(5)
+        self.sl_alpha.valueChanged.connect(lambda v: self.lb_alpha.setText(f"Alpha: {v/100:.2f}"))
+        self.cb_color = QCheckBox("Color watermark (RGB)")
+        ls.addWidget(self.lb_alpha); ls.addWidget(self.sl_alpha); ls.addWidget(self.cb_color)
 
         # Output
         grp_out = QGroupBox("Output")
         lo = QHBoxLayout(grp_out)
-        self.ed_out = QLineEdit()
-        self.ed_out.setPlaceholderText("Đường dẫn file xuất (để trống: *_stego.png và *_meta.npz)")
-        btn_browse_out = QPushButton("Save As")
-        btn_browse_out.clicked.connect(self.on_browse_out)
-        lo.addWidget(btn_browse_out, 0)
-        lo.addWidget(self.ed_out, 1)
+        self.ed_out = QLineEdit(); self.ed_out.setPlaceholderText("Đường dẫn file xuất (trống: *_stego.png + *_meta.npz)")
+        btn_out = QPushButton("Save As"); btn_out.clicked.connect(self.on_browse_out)
+        lo.addWidget(btn_out, 0); lo.addWidget(self.ed_out, 1)
 
-        main.addWidget(grp_payload)
-        main.addWidget(grp_set)
-        main.addWidget(grp_out)
+        main.addWidget(grp_payload); main.addWidget(grp_set); main.addWidget(grp_out)
+        btn_go = QPushButton("EMBED WATERMARK"); btn_go.clicked.connect(self.on_embed)
+        main.addWidget(btn_go)
 
-        # Action
-        btn = QPushButton("EMBED WATERMARK")
-        btn.clicked.connect(self.on_embed)
-        main.addWidget(btn)
-
+    # handlers
     def on_browse_host(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Chọn host image", "", "Image (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)")
-        if path:
-            self.ed_host.setText(path)
-            bgr = cv2.imread(path, cv2.IMREAD_COLOR)
-            if bgr is not None:
-                self.lb_preview.setPixmap(cv2_to_qpixmap(bgr).scaled(self.lb_preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        p, _ = QFileDialog.getOpenFileName(self, "Chọn host image", "", "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)")
+        if p:
+            self.ed_host.setText(p)
+            img = cv2.imread(p, cv2.IMREAD_COLOR)
+            if img is not None:
+                self.lb_preview.setPixmap(cv2_to_qpixmap(img).scaled(self.lb_preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
     def on_browse_payload_img(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Chọn watermark image", "", "Image (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)")
-        if path:
-            self.ed_payload_img.setText(path)
+        p, _ = QFileDialog.getOpenFileName(self, "Chọn watermark image", "", "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)")
+        if p: self.ed_payload_img.setText(p)
+
+    def on_browse_payload_json(self):
+        p, _ = QFileDialog.getOpenFileName(self, "Chọn JSON/TXT", "", "JSON/TXT (*.json *.txt);;All (*.*)")
+        if p:
+            self.ed_payload_json.setText(p)
+            try:
+                with open(p, 'r', encoding='utf-8', errors='ignore') as f:
+                    self.ed_payload.setPlainText(f.read())
+            except Exception as e:
+                QMessageBox.warning(self, "Lỗi", f"Không đọc được file: {e}")
 
     def on_browse_out(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Lưu stego", "", "PNG (*.png)")
-        if path:
-            self.ed_out.setText(path)
-
-    def _on_strength_change(self, v):
-        self.lb_strength.setText(f"Alpha: {v/100:.2f}")
-
-    def _alpha(self) -> float:
-        return self.sl_strength.value()/100.0
+        p, _ = QFileDialog.getSaveFileName(self, "Lưu stego", "", "PNG (*.png)")
+        if p: self.ed_out.setText(p)
 
     def on_embed(self):
         host = self.ed_host.text().strip()
-        if not os.path.isfile(host) or not is_image(host):
-            QMessageBox.warning(self, "Lỗi", "Vui lòng chọn host IMAGE hợp lệ.")
-            return
-        wm = self.ed_payload_img.text().strip()
-        if not os.path.isfile(wm) or not is_image(wm):
-            QMessageBox.warning(self, "Lỗi", "Vui lòng chọn watermark IMAGE (PNG/JPG).")
-            return
-
+        if not (host and is_image(host)):
+            QMessageBox.warning(self, "Lỗi", "Vui lòng chọn host IMAGE hợp lệ."); return
+        alpha = self.sl_alpha.value()/100.0
         out = self.ed_out.text().strip()
-        if not out:
-            out = os.path.splitext(host)[0] + "_stego.png"
+        if not out: out = os.path.splitext(host)[0] + "_stego.png"
         meta = os.path.splitext(out)[0] + "_meta.npz"
-        alpha = self._alpha()
 
         try:
-            out_path, meta_path, ps, ss = embed_dctsvd(host, wm, out, meta, alpha=alpha)
-            QMessageBox.information(self, "Thành công",
-                f"Đã nhúng watermark!\nStego: {out_path}\nMeta: {meta_path}\nPSNR: {ps:.2f} dB\nSSIM: {ss:.4f}")
-            bgr = cv2.imread(out_path, cv2.IMREAD_COLOR)
-            if bgr is not None:
-                self.lb_preview.setPixmap(cv2_to_qpixmap(bgr).scaled(self.lb_preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            if self.rb_img.isChecked():
+                wm = self.ed_payload_img.text().strip()
+                if not (wm and is_image(wm)):
+                    QMessageBox.warning(self, "Lỗi", "Vui lòng chọn watermark IMAGE."); return
+                color = self.cb_color.isChecked()
+                out_path, meta_path, ps, ss = embed_core(host, wm, out, meta, alpha=alpha, color=color, payload_type='image')
+            elif self.rb_text.isChecked():
+                txt = self.ed_payload.toPlainText().strip()
+                if not txt and self.ed_payload_json.text().strip():
+                    try:
+                        with open(self.ed_payload_json.text().strip(), 'r', encoding='utf-8', errors='ignore') as f:
+                            txt = f.read()
+                    except Exception as e:
+                        QMessageBox.warning(self, "Lỗi", f"Không đọc được file: {e}"); return
+                if not txt:
+                    QMessageBox.warning(self, "Lỗi", "Vui lòng nhập TEXT hoặc chọn file .txt"); return
+                out_path, meta_path, ps, ss = embed_core(host, "", out, meta, alpha=alpha, color=False, payload_type='text', text_data=txt)
+            else:  # JSON
+                txt = self.ed_payload.toPlainText().strip()
+                if not txt and self.ed_payload_json.text().strip():
+                    try:
+                        with open(self.ed_payload_json.text().strip(), 'r', encoding='utf-8', errors='ignore') as f:
+                            txt = f.read()
+                    except Exception as e:
+                        QMessageBox.warning(self, "Lỗi", f"Không đọc được file: {e}"); return
+                if not txt:
+                    QMessageBox.warning(self, "Lỗi", "Vui lòng nhập JSON hoặc chọn file .json"); return
+                try: json.loads(txt)
+                except Exception as e:
+                    QMessageBox.warning(self, "Lỗi", f"JSON không hợp lệ: {e}"); return
+                out_path, meta_path, ps, ss = embed_core(host, "", out, meta, alpha=alpha, color=False, payload_type='json', text_data=txt)
+
+            QMessageBox.information(self, "Thành công", f"Đã nhúng watermark!\nStego: {out_path}\nMeta: {meta_path}\nPSNR: {ps:.2f} dB\nSSIM: {ss:.4f}")
+            img = cv2.imread(out_path, cv2.IMREAD_COLOR)
+            if img is not None:
+                self.lb_preview.setPixmap(cv2_to_qpixmap(img).scaled(self.lb_preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
         except Exception as e:
             QMessageBox.critical(self, "Embed thất bại", str(e))
 
-# -------------- EXTRACT TAB --------------
+# ------------ EXTRACT TAB -------------
 class ExtractTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -187,150 +179,113 @@ class ExtractTab(QWidget):
         grp_host = QGroupBox("Watermarked Image")
         lh = QHBoxLayout(grp_host)
         self.ed_stego = QLineEdit()
-        btn_browse = QPushButton("Browse")
-        btn_browse.clicked.connect(self.on_browse)
-        lh.addWidget(btn_browse, 0)
-        lh.addWidget(self.ed_stego, 1)
+        btn = QPushButton("Browse"); btn.clicked.connect(self.on_browse)
+        lh.addWidget(btn, 0); lh.addWidget(self.ed_stego, 1)
         main.addWidget(grp_host)
 
-        # meta path (auto, but allow manual select on missing)
         grp_meta = QGroupBox("Meta (.npz)")
         lm = QHBoxLayout(grp_meta)
-        self.ed_meta = QLineEdit()
-        self.ed_meta.setPlaceholderText("Tự động: <stego>_meta.npz (có thể chọn tay nếu không tìm thấy)")
-        btn_meta = QPushButton("Browse")
-        btn_meta.clicked.connect(self.on_browse_meta)
-        lm.addWidget(btn_meta, 0); lm.addWidget(self.ed_meta, 1)
+        self.ed_meta = QLineEdit(); self.ed_meta.setPlaceholderText("Tự dò <stego>_meta.npz nếu để trống")
+        btnm = QPushButton("Browse"); btnm.clicked.connect(self.on_browse_meta)
+        lm.addWidget(btnm, 0); lm.addWidget(self.ed_meta, 1)
         main.addWidget(grp_meta)
 
-        self.lb_preview = QLabel("Preview / Results")
-        self.lb_preview.setFixedHeight(320)
-        self.lb_preview.setAlignment(Qt.AlignCenter)
-        self.lb_preview.setStyleSheet("QLabel{border:1px solid #444; background:#111; color:#bbb;}")
+        self.lb_preview = QLabel("Preview / Results"); self.lb_preview.setFixedHeight(320); self.lb_preview.setAlignment(Qt.AlignCenter)
+        self.lb_preview.setStyleSheet("QLabel{border:1px solid #444;background:#111;color:#bbb;}")
         main.addWidget(self.lb_preview)
 
-        btn = QPushButton("EXTRACT WATERMARK")
-        btn.clicked.connect(self.on_extract)
-        main.addWidget(btn)
+        btn_go = QPushButton("EXTRACT"); btn_go.clicked.connect(self.on_extract)
+        main.addWidget(btn_go)
 
     def on_browse(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Chọn stego image", "", "Image (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)")
-        if path: self.ed_stego.setText(path)
+        p, _ = QFileDialog.getOpenFileName(self, "Chọn stego image", "", "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)")
+        if p: self.ed_stego.setText(p)
 
     def on_browse_meta(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Chọn meta", "", "NPZ (*.npz)")
-        if path: self.ed_meta.setText(path)
+        p, _ = QFileDialog.getOpenFileName(self, "Chọn meta", "", "NPZ (*.npz)")
+        if p: self.ed_meta.setText(p)
 
     def on_extract(self):
         stego = self.ed_stego.text().strip()
-        if not os.path.isfile(stego):
-            QMessageBox.warning(self, "Lỗi", "Vui lòng chọn stego image.")
-            return
+        if not stego: QMessageBox.warning(self,"Lỗi","Chọn stego image."); return
         meta = self.ed_meta.text().strip()
         if not meta:
             guess = os.path.splitext(stego)[0] + "_meta.npz"
-            if os.path.isfile(guess):
-                meta = guess
-            else:
-                path, _ = QFileDialog.getOpenFileName(self, "Chọn meta", "", "NPZ (*.npz)")
-                if not path: return
-                meta = path
-                self.ed_meta.setText(path)
-        out_wm = os.path.splitext(stego)[0] + "_wm.png"
+            if os.path.isfile(guess): meta = guess
+        out_base = os.path.splitext(stego)[0] + "_recovered"
         try:
-            wm_path = extract_dctsvd(stego, meta, out_wm)
-            pix = QPixmap(wm_path)
-            self.lb_preview.setPixmap(pix.scaled(self.lb_preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            QMessageBox.information(self, "Xong", f"Khôi phục watermark: {wm_path}")
+            out_path = extract_core(stego, meta, out_base)
+            ext = os.path.splitext(out_path)[1].lower()
+            if ext in (".png",".jpg",".jpeg"):
+                pix = QPixmap(out_path); self.lb_preview.setPixmap(pix.scaled(self.lb_preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            else:
+                with open(out_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    txt = f.read()
+                if len(txt) > 4000: txt = txt[:4000] + "\n...\n(truncated)"
+                self.lb_preview.setText(txt)
+            QMessageBox.information(self, "Xong", f"Khôi phục: {out_path}")
         except Exception as e:
             QMessageBox.critical(self, "Extract thất bại", str(e))
 
-# -------------- DETECT TAB --------------
+# ------------ DETECT TAB -------------
 class DetectTab(QWidget):
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self._build_ui()
+        super().__init__(parent); self._build_ui()
 
     def _build_ui(self):
         main = QVBoxLayout(self)
 
         grp_host = QGroupBox("Watermarked Image")
         lh = QHBoxLayout(grp_host)
-        self.ed_stego = QLineEdit()
-        btn_browse = QPushButton("Browse")
-        btn_browse.clicked.connect(self.on_browse)
-        lh.addWidget(btn_browse, 0)
-        lh.addWidget(self.ed_stego, 1)
-        main.addWidget(grp_host)
+        self.ed_stego = QLineEdit(); btn = QPushButton("Browse"); btn.clicked.connect(self.on_browse)
+        lh.addWidget(btn,0); lh.addWidget(self.ed_stego,1); main.addWidget(grp_host)
 
         grp_meta = QGroupBox("Meta (.npz)")
         lm = QHBoxLayout(grp_meta)
-        self.ed_meta = QLineEdit()
-        self.ed_meta.setPlaceholderText("Tự động: <stego>_meta.npz (có thể chọn tay nếu không tìm thấy)")
-        btn_meta = QPushButton("Browse")
-        btn_meta.clicked.connect(self.on_browse_meta)
-        lm.addWidget(btn_meta, 0); lm.addWidget(self.ed_meta, 1)
-        main.addWidget(grp_meta)
+        self.ed_meta = QLineEdit(); self.ed_meta.setPlaceholderText("Tự dò <stego>_meta.npz nếu để trống")
+        btnm = QPushButton("Browse"); btnm.clicked.connect(self.on_browse_meta)
+        lm.addWidget(btnm,0); lm.addWidget(self.ed_meta,1); main.addWidget(grp_meta)
 
-        self.lb_preview = QLabel("Preview / Results")
-        self.lb_preview.setFixedHeight(220)
-        self.lb_preview.setAlignment(Qt.AlignCenter)
-        self.lb_preview.setStyleSheet("QLabel{border:1px solid #444; background:#111; color:#bbb;}")
+        self.lb_preview = QLabel("Preview / Results"); self.lb_preview.setFixedHeight(220); self.lb_preview.setAlignment(Qt.AlignCenter)
+        self.lb_preview.setStyleSheet("QLabel{border:1px solid #444;background:#111;color:#bbb;}")
         main.addWidget(self.lb_preview)
 
-        self.lb_strength = QLabel("Thresh NC: 0.60")
-        self.sl_strength = QSlider(Qt.Horizontal)
-        self.sl_strength.setMinimum(10)  # 0.10
-        self.sl_strength.setMaximum(90)  # 0.90
-        self.sl_strength.setValue(60)    # 0.60
-        self.sl_strength.valueChanged.connect(self._on_thresh_change)
-        main.addWidget(self.lb_strength)
-        main.addWidget(self.sl_strength)
+        self.lb_thresh = QLabel("Thresh NC: 0.60")
+        self.sl_thresh = QSlider(Qt.Horizontal); self.sl_thresh.setMinimum(10); self.sl_thresh.setMaximum(90); self.sl_thresh.setValue(60)
+        self.sl_thresh.valueChanged.connect(lambda v: self.lb_thresh.setText(f"Thresh NC: {v/100:.2f}"))
+        main.addWidget(self.lb_thresh); main.addWidget(self.sl_thresh)
 
-        btn = QPushButton("DETECT PRESENCE")
-        btn.clicked.connect(self.on_detect)
-        main.addWidget(btn)
-
-    def _on_thresh_change(self, v):
-        self.lb_strength.setText(f"Thresh NC: {v/100:.2f}")
+        btn_go = QPushButton("DETECT PRESENCE"); btn_go.clicked.connect(self.on_detect)
+        main.addWidget(btn_go)
 
     def on_browse(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Chọn stego image", "", "Image (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)")
-        if path: self.ed_stego.setText(path)
+        p, _ = QFileDialog.getOpenFileName(self, "Chọn stego image", "", "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)")
+        if p: self.ed_stego.setText(p)
 
     def on_browse_meta(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Chọn meta", "", "NPZ (*.npz)")
-        if path: self.ed_meta.setText(path)
+        p, _ = QFileDialog.getOpenFileName(self, "Chọn meta", "", "NPZ (*.npz)")
+        if p: self.ed_meta.setText(p)
 
     def on_detect(self):
         stego = self.ed_stego.text().strip()
-        if not os.path.isfile(stego):
-            QMessageBox.warning(self, "Lỗi", "Vui lòng chọn stego image.")
-            return
+        if not stego: QMessageBox.warning(self, "Lỗi", "Chọn stego image."); return
         meta = self.ed_meta.text().strip()
         if not meta:
             guess = os.path.splitext(stego)[0] + "_meta.npz"
-            meta = guess if os.path.isfile(guess) else ""
-        if not meta:
-            path, _ = QFileDialog.getOpenFileName(self, "Chọn meta", "", "NPZ (*.npz)")
-            if not path: return
-            meta = path; self.ed_meta.setText(path)
-        thresh = self.sl_strength.value()/100.0
+            if os.path.isfile(guess): meta = guess
+        thresh = self.sl_thresh.value()/100.0
         try:
-            ok, score = detect_dctsvd(stego, meta, thresh=thresh)
+            ok, score = detect_core(stego, meta, thresh=thresh)
             msg = f"NC = {score:.4f}\n" + ("✅ Có watermark" if ok else "❌ Không thấy watermark")
-            self.lb_preview.setText(msg)
-            QMessageBox.information(self, "Kết quả detect", msg)
+            self.lb_preview.setText(msg); QMessageBox.information(self, "Kết quả detect", msg)
         except Exception as e:
             QMessageBox.critical(self, "Detect thất bại", str(e))
 
-# -------------- Main Window --------------
+# ----------- Main -----------
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(APP_TITLE)
-        self.resize(980, 680)
-
+        self.setWindowTitle(APP_TITLE); self.resize(1000, 700)
         tabs = QTabWidget()
         tabs.addTab(EmbedTab(), "EMBED")
         tabs.addTab(ExtractTab(), "EXTRACT")
@@ -339,8 +294,7 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
-    w = MainWindow()
-    w.show()
+    w = MainWindow(); w.show()
     sys.exit(app.exec())
 
 if __name__ == "__main__":
