@@ -47,12 +47,12 @@ venv\Scripts\activate
 python -m pip install --upgrade pip wheel
 pip install numpy opencv-python PySide6
 
-
+```
 #### MacOS - Linux (Terminal)
 ```bat
 python3 -m venv venv
 source venv/bin/activate
 python -m pip install --upgrade pip wheel
 pip install numpy opencv-python PySide6
-
+```
 
