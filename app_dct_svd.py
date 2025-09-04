@@ -1,4 +1,3 @@
-
 # app_dct_svd.py
 # Same 3-tab UI (EMBED / EXTRACT / DETECT), but strictly DCT–SVD for IMAGES.
 # - Only watermark IMAGE is supported (PNG/JPG).
