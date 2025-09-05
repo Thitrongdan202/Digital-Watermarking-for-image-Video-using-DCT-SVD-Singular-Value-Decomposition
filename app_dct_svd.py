@@ -276,7 +276,7 @@ class DetectTab(QWidget):
         thresh = self.sl_thresh.value()/100.0
         try:
             ok, score = detect_core(stego, meta, thresh=thresh)
-            msg = f"NC = {score:.4f}\n" + ("✅ Có watermark" if ok else "❌ Không thấy watermark")
+            msg = f"NC = {score:.4f}\n" + ("Có watermark" if ok else "Không thấy watermark")
             self.lb_preview.setText(msg); QMessageBox.information(self, "Kết quả detect", msg)
         except Exception as e:
             QMessageBox.critical(self, "Detect thất bại", str(e))
