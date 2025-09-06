@@ -1,121 +1,126 @@
-# Hướng dẫn cài đặt hệ thống Digital Watermarking (DCT–SVD)
+# DCT–SVD Watermarking (Images + Password)
 
-Tài liệu này chỉ tập trung vào **hướng dẫn cài đặt & chạy** ứng dụng.  
-(Ứng dụng có 3 tab: **EMBED / EXTRACT / DETECT**)
-
----
-
-## 1) Yêu cầu
-
-- **Python 3.9 – 3.12** (khuyến nghị **3.12**)
-- Hệ điều hành: Windows / macOS / Linux
-- Dung lượng trống vài trăm MB để cài thư viện
-
-> **Khuyến nghị dùng PySide6** (ổn định hơn PyQt5 trên Windows).  
-> Nếu gặp lỗi DLL với PyQt5, hãy chuyển sang PySide6.
+> **Chỉ nhúng/giải trích ảnh + mật khẩu**. Đã **bỏ Text/JSON**. Có 2 cách chạy:
+>
+> 1) **Một file duy nhất** (khuyến nghị): `app_dct_svd_single.py` – không phụ thuộc core bên ngoài.
+> 2) **Tách core + app** (chỉ dùng khi bạn cần tách module): `app_dct_svd_image_only_nopreview_forcecore.py` + `dct_svd_core_secure.py`
 
 ---
 
-## 2) Chuẩn bị mã nguồn
+## 1) Cài thư viện
 
-Đặt các file sau **cùng một thư mục** (project root):
-
-```
-dct_svd_core.py
-app_dct_svd.py            # Bản dùng PyQt5
-app_dct_svd_pyside6.py    # Bản dùng PySide6 (khuyến nghị)
-```
-
-> Nếu  chỉ dùng PySide6, có thể chạy trực tiếp `app_dct_svd_pyside6.py`.
-
----
-
-## 3) Tạo môi trường ảo & cài thư viện
-
-### Windows (PowerShell hoặc CMD)
+### Nhanh nhất
 ```bat
-py -3.12 -m venv venv
+pip install -r requirements.txt
+```
+
+### Nếu chưa có `pip`/venv (khuyến nghị dùng venv)
+```bat
+python -m venv venv
 venv\Scripts\activate
-python -m pip install --upgrade pip wheel
-pip install numpy opencv-python PySide6
+pip install -r requirements.txt
 ```
 
-### macOS / Linux (Terminal)
-```bash
-python3 -m venv venv
-source venv/bin/activate
-python -m pip install --upgrade pip wheel
-pip install numpy opencv-python PySide6
+> Mặc định dự án dùng `opencv-python`. Nếu hàm **`cv2.fastNlMeansDenoisingColored`** không có trên máy bạn, hãy **gỡ `opencv-python` và cài `opencv-contrib-python`**:
+```bat
+pip uninstall -y opencv-python
+pip install opencv-contrib-python>=4.8
 ```
-
-> **Tuỳ chọn (nếu muốn dùng PyQt5 thay PySide6):**
-> ```bash
-> pip install --only-binary=:all: PyQt5==5.15.10 PyQt5-sip==12.13.0
-> ```
 
 ---
 
-## 4) Chạy ứng dụng
+## 2) Cách chạy
 
-### Khuyến nghị (PySide6)
-```bash
-python app_dct_svd_pyside6.py
+### Cách A – **Một file duy nhất** (đề xuất)
+Không cần để core ở ngoài, không sợ nạp nhầm module.
+
+```bat
+python app_dct_svd_single.py
 ```
 
-### Nếu đã cài PyQt5
-```bash
-python app_dct_svd.py
-```
+**EMBED**
+1. Chọn **Host Image**, **Watermark Image**, nhập **Password**.
+2. Chọn **Alpha** (khuyến nghị 0.10 → 0.18; logo mảnh có thể 0.15 → 0.22).
+3. (Tuỳ chọn) tick **Color watermark (RGB)** nếu muốn nhúng màu.
+4. Bấm **EMBED WATERMARK** → sinh `*_stego.png` và `*_stego_meta.npz`.
 
-> Ứng dụng sẽ mở giao diện gồm 3 tab: **EMBED / EXTRACT / DETECT**.
+**EXTRACT**
+1. Chọn **Stego**, **Meta (.npz)**, nhập **Password**.
+2. Chọn nơi lưu **Out** → **EXTRACT** → xem preview watermark phía dưới.
+   - Ảnh sẽ được denoise + enhance (CLAHE + unsharp).
+
+**DETECT**
+- Chọn **Stego** + **Meta** → **DETECT** (không cần mật khẩu) để xem **Score**.
 
 ---
 
-## 5) Kiểm tra nhanh (tuỳ chọn)
+### Cách B – **Tách core + app**
+Chỉ dùng khi bạn muốn tách file:
 
-Kiểm tra OpenCV đã cài và phiên bản:
-
-- **Windows (PowerShell/CMD):**
+- Để **cùng thư mục**:
+  - `app_dct_svd_image_only_nopreview_forcecore.py`
+  - `dct_svd_core_secure.py`
+- Chạy:
   ```bat
-  python -c "import cv2, numpy as np; print('OpenCV:', cv2.__version__)"
+  python app_dct_svd_image_only_nopreview_forcecore.py
   ```
+- App sẽ **ép nạp core theo đúng đường dẫn** cạnh file app (không ăn nhầm core cũ trong máy).
 
-- **macOS/Linux:**
-  ```bash
-  python -c 'import cv2, numpy as np; print("OpenCV:", cv2.__version__)'
-  ```
+> Nếu bạn dùng bản app khác (`app_dct_svd.py`) thì **bắt buộc** đặt `dct_svd_core_secure.py` hoặc `dct_svd_core.py` (bản mới) **cạnh file app** và xoá thư mục `__pycache__` để tránh cache cũ.
 
 ---
 
-## 6) Khắc phục lỗi thường gặp
-
-- **ImportError: QtCore / lỗi DLL PyQt5 trên Windows**  
-→ Dùng **PySide6** (cài `pip install PySide6`) và chạy:  
-  ```bash
-  python app_dct_svd_pyside6.py
-  ```
-
-- **Màn hình đen / không lên cửa sổ trên Linux**  
-→ Cài thêm thư viện GUI hệ thống (ví dụ Ubuntu):  
-  ```bash
-  sudo apt-get update
-  sudo apt-get install -y libgl1 libxkbcommon-x11-0
-  ```
-
-- **Cài pip thất bại**  
-→ Nâng cấp pip/wheel trước:
-  ```bash
-  python -m pip install --upgrade pip wheel
-  ```
-
-- **Thiếu quyền**  
-→ Tránh dùng `sudo pip`; hãy dùng **venv** như hướng dẫn ở trên.
+## 3) Tính năng kỹ thuật
+- DCT + SVD, **mid-band embedding** (lưu `kfrac` trong meta) → tăng **tính bền vững** & **chất lượng**.
+- **Bảo vệ bằng mật khẩu**: khoá ngẫu nhiên (nonce) + HMAC kiểm tra meta.
+- **EXTRACT**: denoise (Non-local Means) + **enhance** (CLAHE + unsharp).
+- PSNR/SSIM sau embed để bạn ước lượng độ méo.
+- **PNG** cho stego để tránh nén mất mát.
 
 ---
 
-## 7) Gợi ý sử dụng 
+## 4) Mẹo chất lượng
+- Ưu tiên **PNG** cho cover/stego.
+- **Alpha** gợi ý:
+  - Ảnh sáng/tối rõ, watermark đơn sắc: `0.10 – 0.16`.
+  - Logo/biên mảnh hoặc muốn dễ nhìn hơn khi extract: `0.15 – 0.22`.
+- Nếu watermark nhiều hạt/nhiễu, thử **không tick Color watermark** để nhúng kênh Y (xám).
 
-- **EMBED:** chọn ảnh gốc → chọn loại payload (Image/Text/JSON) → chỉnh **Alpha** → **EMBED WATERMARK**  
-- **EXTRACT:** chọn `*_stego.png` (để trống meta cũng được, app sẽ tự dò) → **EXTRACT**  
-- **DETECT:** chọn `*_stego.png` → chỉnh ngưỡng **Thresh NC** → **DETECT PRESENCE**
+---
+
+## 5) Lỗi thường gặp & cách xử lý
+
+### “`unexpected keyword argument 'password'`”
+- Bạn đang dùng **app mới** nhưng **core cũ**. Sử dụng **Cách A (1 file)** để khỏi lệ thuộc core.
+- Hoặc chắc chắn đặt **`dct_svd_core_secure.py`** (hoặc bản mới của `dct_svd_core.py`) cạnh file app và xoá `__pycache__`.
+
+### “`The truth value of an array with more than one element is ambiguous...`”
+- Đã vá trong app: đọc màu trước, nếu `None` thì mới đọc xám – không còn lỗi này.
+
+### Preview sau EMBED vướng màn hình
+- Dùng bản **no preview** (đã set sẵn) hoặc bản thường nếu muốn xem stego ngay.
+
+---
+
+## 6) Đóng gói EXE (tuỳ chọn)
+```bat
+pip install pyinstaller
+pyinstaller -F -w app_dct_svd_single.py
+```
+- File `.exe` nằm trong thư mục `dist/`.  
+- Nếu dùng PyInstaller, đảm bảo Windows có **VC++ Redistributable** (thường đã có).
+
+---
+
+## 7) Cấu trúc đề xuất
+```
+project/
+ ├─ app_dct_svd_single.py                 # bản 1 file (đề xuất)
+ ├─ app_dct_svd_image_only_nopreview_forcecore.py  # bản tách core (ép nạp theo path)
+ ├─ dct_svd_core_secure.py                # core mới (nếu tách module)
+ ├─ requirements.txt
+ └─ README.md
+```
+
+
 
