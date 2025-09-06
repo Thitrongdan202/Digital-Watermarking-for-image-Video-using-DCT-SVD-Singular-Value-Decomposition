@@ -1,6 +1,6 @@
 # DCT–SVD Watermarking (Images + Password)
 
-> **Chỉ nhúng/giải trích ảnh + mật khẩu**. Đã **bỏ Text/JSON**. Có 2 cách chạy:
+> **Nhúng/giải trích ảnh + mật khẩu**. Đã **bỏ Text/JSON**. Có 2 cách chạy:
 >
 > 1) **Một file duy nhất** (khuyến nghị): `app_dct_svd_single.py` – không phụ thuộc core bên ngoài.
 > 2) **Tách core + app** (chỉ dùng khi bạn cần tách module): `app_dct_svd_image_only_nopreview_forcecore.py` + `dct_svd_core_secure.py`
@@ -9,7 +9,6 @@
 
 ## 1) Cài thư viện
 
-### Nhanh nhất
 ```bat
 pip install -r requirements.txt
 ```
@@ -21,7 +20,7 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-> Mặc định dự án dùng `opencv-python`. Nếu hàm **`cv2.fastNlMeansDenoisingColored`** không có trên máy bạn, hãy **gỡ `opencv-python` và cài `opencv-contrib-python`**:
+> Mặc định dự án dùng `opencv-python`. Nếu hàm **`cv2.fastNlMeansDenoisingColored`** không có trên máy, hãy **gỡ `opencv-python` và cài `opencv-contrib-python`**:
 ```bat
 pip uninstall -y opencv-python
 pip install opencv-contrib-python>=4.8
@@ -66,7 +65,7 @@ Chỉ dùng khi bạn muốn tách file:
   ```
 - App sẽ **ép nạp core theo đúng đường dẫn** cạnh file app (không ăn nhầm core cũ trong máy).
 
-> Nếu bạn dùng bản app khác (`app_dct_svd.py`) thì **bắt buộc** đặt `dct_svd_core_secure.py` hoặc `dct_svd_core.py` (bản mới) **cạnh file app** và xoá thư mục `__pycache__` để tránh cache cũ.
+> Nếu dùng bản app khác (`app_dct_svd.py`) thì **bắt buộc** đặt `dct_svd_core_secure.py` hoặc `dct_svd_core.py` (bản mới) **cạnh file app** và xoá thư mục `__pycache__` để tránh cache cũ.
 
 ---
 
