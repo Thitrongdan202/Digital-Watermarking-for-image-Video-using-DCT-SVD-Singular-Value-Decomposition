@@ -57,16 +57,11 @@ python app_dct_svd_single.py
 Chỉ dùng khi bạn muốn tách file:
 
 - Để **cùng thư mục**:
-  - `app_dct_svd_image_only_nopreview_forcecore.py`
   - `dct_svd_core_secure.py`
 - Chạy:
   ```bat
   python app_dct_svd_image_only_nopreview_forcecore.py
   ```
-- App sẽ **ép nạp core theo đúng đường dẫn** cạnh file app (không ăn nhầm core cũ trong máy).
-
-> Nếu dùng bản app khác (`app_dct_svd.py`) thì **bắt buộc** đặt `dct_svd_core_secure.py` hoặc `dct_svd_core.py` (bản mới) **cạnh file app** và xoá thư mục `__pycache__` để tránh cache cũ.
-
 ---
 
 ## 3) Tính năng kỹ thuật
@@ -111,12 +106,12 @@ pyinstaller -F -w app_dct_svd_single.py
 
 ---
 
-## 7) Cấu trúc đề xuất
+## 7) Cấu trúc
 ```
 project/
- ├─ app_dct_svd_single.py                 # bản 1 file (đề xuất)
- ├─ app_dct_svd_image_only_nopreview_forcecore.py  # bản tách core (ép nạp theo path)
- ├─ dct_svd_core_secure.py                # core mới (nếu tách module)
+ ├─ app_dct_svd_single.py                 
+ ├─ app_dct_svd_pyside6.py  
+ ├─ dct_svd_core_secure.py                
  ├─ requirements.txt
  └─ README.md
 ```
