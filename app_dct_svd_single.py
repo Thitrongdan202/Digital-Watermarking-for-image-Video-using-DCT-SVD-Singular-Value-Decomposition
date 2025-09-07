@@ -1,6 +1,3 @@
-
-# app_dct_svd_single.py — One-file app (Images + Password, no EMBED preview)
-# Requires: pip install opencv-python PySide6
 import sys, os, cv2, numpy as np, hashlib, hmac, inspect
 from typing import Optional
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -9,8 +6,7 @@ from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap, QImage
 
-# ----------------------- SECURE CORE (embedded) -----------------------
-K_FRAC_DEFAULT = 0.6  # embed top 60% singular values
+K_FRAC_DEFAULT = 0.6
 
 def _read_image(path: str) -> np.ndarray:
     bgr = cv2.imread(path, cv2.IMREAD_COLOR)

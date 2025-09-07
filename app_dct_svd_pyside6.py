@@ -1,5 +1,3 @@
-
-# Minimal PySide6 app: image-only watermarking with password
 import sys, os, cv2
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QFileDialog, QTabWidget, QCheckBox, QSlider)
@@ -52,7 +50,6 @@ class App(QWidget):
         self.lbl_preview = QLabel(); ev.addWidget(self.lbl_preview)
         btn_run = QPushButton("NHÚNG"); ev.addWidget(btn_run)
 
-        # file pickers
         btn_cover.clicked.connect(lambda: self.ed_cover.setText(QFileDialog.getOpenFileName(self, "Chọn cover", "", "Images (*.png *.jpg *.jpeg *.bmp)")[0]))
         btn_wm.clicked.connect(lambda: self.ed_wm.setText(QFileDialog.getOpenFileName(self, "Chọn watermark", "", "Images (*.png *.jpg *.jpeg *.bmp)")[0]))
         btn_out.clicked.connect(lambda: self.ed_out.setText(QFileDialog.getSaveFileName(self, "Chọn stego out", "", "PNG (*.png)")[0]))
@@ -76,7 +73,6 @@ class App(QWidget):
                 self.lbl_psnr.setText("LỖI: " + str(e))
         btn_run.clicked.connect(do_embed)
 
-        # --------- EXTRACT TAB ---------
         xtab = QWidget(); tabs.addTab(xtab, "Extract")
         xv = QVBoxLayout(xtab)
         self.ed_stego = QLineEdit(); btn_stego = QPushButton("Chọn stego...")

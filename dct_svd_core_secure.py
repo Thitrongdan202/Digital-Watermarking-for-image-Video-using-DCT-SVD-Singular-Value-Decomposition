@@ -1,12 +1,3 @@
-# dct_svd_core.py
-# DCT–SVD watermarking for IMAGES (non-blind):
-# - Supports gray/color IMAGE watermark
-# - Supports TEXT/JSON payloads by mapping bytes -> bit-image internally (gray pipeline)
-#
-# Outputs:
-#   - stego.png (lossless)
-#   - meta.npz  (stores SVD data + mode + payload_type + alpha + shape)
-
 import os, json
 import cv2
 import numpy as np
@@ -81,7 +72,6 @@ def _bitimg_to_bytes(img: np.ndarray) -> bytes:
     by = np.packbits(payload_bits).tobytes()
     return by[:L]
 
-# ---------------- Core DCT-SVD ----------------
 def embed(cover_path: str,
           wm_source: str,
           out_path: str,
@@ -130,7 +120,6 @@ def embed(cover_path: str,
         ps = psnr(cover, stego); ss = ssim(cv2.cvtColor(cover, cv2.COLOR_BGR2GRAY), Yw)
         return out_path, meta_path, ps, ss
 
-    # IMAGE payload
     wm = cv2.imread(wm_source, cv2.IMREAD_COLOR)
     if wm is None: raise ValueError(f"Không mở được watermark: {wm_source}")
     wm = cv2.resize(wm, (W, H), interpolation=cv2.INTER_AREA).astype(np.float32)
@@ -151,7 +140,6 @@ def embed(cover_path: str,
         ps = psnr(cover, stego); ss = ssim(cv2.cvtColor(cover, cv2.COLOR_BGR2GRAY), Yw)
         return out_path, meta_path, ps, ss
 
-    # COLOR image watermark (per-channel)
     b,g,r = cv2.split(cover.astype(np.float32))
     wb,wg,wr = cv2.split(wm)
     Cb, Cg, Cr = dct2(b), dct2(g), dct2(r)
@@ -262,7 +250,6 @@ def extract(stego_path: str, meta_path: str, out_path: str, normalize: bool=True
         if not ok: raise IOError('Ghi watermark thất bại.')
         return out_path
 
-    # color
     b,g,r = cv2.split(st.astype(np.float32))
     Cb, Cg, Cr = dct2(b), dct2(g), dct2(r)
     _, S_cwb, _ = np.linalg.svd(Cb, full_matrices=False)
@@ -318,7 +305,6 @@ def detect(stego_path: str, meta_path: str, thresh: float = 0.6) -> Tuple[bool, 
         v2 = v2.flatten().astype(np.float32)
         if v1.size != v2.size or v1.size == 0:
             return 0.0
-        # Normalize vectors to have zero mean and unit variance
         v1_norm = v1 - np.mean(v1)
         v2_norm = v2 - np.mean(v2)
         denom1 = np.sqrt(np.sum(v1_norm ** 2))
