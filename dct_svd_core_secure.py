@@ -43,9 +43,7 @@ def ssim(img1, img2):
     ssim_map = ((2*mu1_mu2 + C1)*(2*sigma12 + C2)) / ((mu1_sq + mu2_sq + C1)*(sigma1_sq + sigma2_sq + C2) + 1e-12)
     return float(np.mean(ssim_map))
 
-# ---------------- bytes <-> bit-image (for text/json) ----------------
 def _bytes_to_bitimg(data: bytes, H: int, W: int) -> np.ndarray:
-    # Prepend 4-byte little-endian length
     L = len(data)
     header = L.to_bytes(4, 'little', signed=False)
     bits = np.unpackbits(np.frombuffer(header+data, dtype=np.uint8))
@@ -66,7 +64,6 @@ def _bitimg_to_bytes(img: np.ndarray) -> bytes:
     need = 32 + L*8
     need = min(need, bits.size)
     payload_bits = bits[32:need]
-    # pad to byte
     if payload_bits.size % 8 != 0:
         payload_bits = np.pad(payload_bits, (0, 8 - (payload_bits.size % 8)))
     by = np.packbits(payload_bits).tobytes()
@@ -80,11 +77,6 @@ def embed(cover_path: str,
           color: bool = False,
           payload_type: str = 'image',
           text_data: Optional[str] = None) -> Tuple[str,str,float,float]:
-    """
-    payload_type: 'image' | 'text' | 'json'
-    - if 'image': wm_source is path to image; color flag controls RGB mode.
-    - if 'text' or 'json': text_data used (if None, read from wm_source as text file)
-    """
     cover = _read_image(cover_path)
     H, W = cover.shape[:2]
 

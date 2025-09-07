@@ -19,7 +19,6 @@ class App(QWidget):
         self.setWindowTitle("DCT-SVD Watermark (Image-Only, Password)")
         tabs = QTabWidget(self)
 
-        # --------- EMBED TAB ---------
         embed_tab = QWidget(); tabs.addTab(embed_tab, "Embed")
         ev = QVBoxLayout(embed_tab)
 
